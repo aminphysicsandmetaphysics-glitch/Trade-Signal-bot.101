@@ -1,37 +1,88 @@
+"""Telethon wrapper for forwarding and parsing trading signals.
+
+This module encapsulates all Telegram interaction.  It normalises
+channel identifiers, listens to new messages from a list of source
+channels and forwards or copies them to a single destination channel.
+
+When forwarding fails due to content protection, the bot will fall
+back to copying the text and any attached media.
+"""
+
 from __future__ import annotations
-import os
-import re
-import json
+
 import asyncio
-import base64
 import logging
-from typing import Iterable, Optional, Dict, List, Union
+import re
+from typing import List, Dict, Optional, Iterable, Callable, Union
 
 from telethon import TelegramClient, events
-from telethon.errors import ChatWriteForbiddenError, ChatAdminRequiredError, ChannelPrivateError
+from telethon.errors import (
+    ChannelPrivateError,
+    ChatAdminRequiredError,
+    ChatWriteForbiddenError,
+)
 
-log = logging.getLogger("signal-bot")
+
+# ----------------------------------------------------------------------------
+# Logging
+# ----------------------------------------------------------------------------
+
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+log = logging.getLogger("signal-bot")
 
-# ---------- Parsers ----------
-PAIR_RE = re.compile(r"(#?\b(?:XAUUSD|XAGUSD|GOLD|SILVER|USOIL|UKOIL|[A-Z]{3,5}[/ ]?[A-Z]{3,5}|[A-Z]{3,5}USD|USD[A-Z]{3,5})\b)")
+
+# ----------------------------------------------------------------------------
+# Signal parsing
+# ----------------------------------------------------------------------------
+
+PAIR_RE = re.compile(
+    r"(#?\b(?:XAUUSD|XAGUSD|GOLD|SILVER|USOIL|UKOIL|[A-Z]{3,5}[/ ]?[A-Z]{3,5}|[A-Z]{3,5}USD|USD[A-Z]{3,5})\b)"
+)
 NUM_RE = re.compile(r"(-?\d+(?:\.\d+)?)")
-RR_RE = re.compile(r"(\b(?:R\s*/\s*R|Risk[- ]?Reward|Risk\s*:\s*Reward)\b[^0-9]*?(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?))", re.IGNORECASE)
+RR_RE = re.compile(
+    r"(\b(?:R\s*/\s*R|Risk[- ]?Reward|Risk\s*:\s*Reward)\b[^0-9]*?(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?))",
+    re.IGNORECASE,
+)
 
 POS_VARIANTS = [
-    ("BUY LIMIT", "BUY LIMIT"),
-    ("SELL LIMIT", "SELL LIMIT"),
-    ("BUY STOP", "BUY STOP"),
-    ("SELL STOP", "SELL STOP"),
-    ("BUY", "BUY"),
-    ("SELL", "SELL"),
+    ("BUY LIMIT", "Buy Limit"),
+    ("SELL LIMIT", "Sell Limit"),
+    ("BUY STOP", "Buy Stop"),
+    ("SELL STOP", "Sell Stop"),
+    ("BUY", "Buy"),
+    ("SELL", "Sell"),
 ]
 
 NON_SIGNAL_HINTS = [
-    "activated", "tp reached", "result so far", "screenshots", "cheers", "high-risk",
-    "move sl", "put your sl", "risk free", "close", "closed", "delete", "running",
-    "trade - update", "update", "guide", "watchlist", "broker", "subscription", "contact",
-    "tp almost", "tp hit", "sl reached", "sl hit", "profits", "week", "friday", "poll",
+    "activated",
+    "tp reached",
+    "result so far",
+    "screenshots",
+    "cheers",
+    "high-risk setup",
+    "move sl",
+    "put your sl",
+    "risk free",
+    "close",
+    "closed",
+    "delete",
+    "running",
+    "trade - update",
+    "update",
+    "guide",
+    "watchlist",
+    "broker",
+    "subscription",
+    "contact",
+    "admin",
+    "tp almost",
+    "tp hit",
+    "tp reached",
+    "sl reached",
+    "sl hit",
+    "profits",
+    "week",
+    "friday",
 ]
 
 TP_KEYS = ["tp", "take profit", "take-profit", "t/p", "t p"]
@@ -40,7 +91,7 @@ ENTRY_KEYS = ["entry price", "entry", "e:"]
 
 
 def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
+    return re.sub(r"\s+", " ", s).strip()
 
 
 def guess_symbol(text: str) -> Optional[str]:
@@ -57,25 +108,25 @@ def guess_position(text: str) -> Optional[str]:
     up = (text or "").upper()
     for raw, norm in POS_VARIANTS:
         if raw in up:
-            return norm.title().replace(" ", " ")
-    if "BUY" in up:
-        return "BUY"
-    if "SELL" in up:
-        return "SELL"
+            return norm
+    if re.search(r"\bBUY\b", up):
+        return "Buy"
+    if re.search(r"\bSELL\b", up):
+        return "Sell"
     return None
 
 
 def extract_entry(lines: List[str]) -> Optional[str]:
     for l in lines:
-        low = l.lower()
-        if any(k in low for k in ENTRY_KEYS):
+        if any(k in l.lower() for k in ENTRY_KEYS):
             m = NUM_RE.search(l)
             if m:
                 return m.group(1)
     for l in lines:
-        m = re.search(r"\b(BUY|SELL)(?:\s+(LIMIT|STOP))?\s+(-?\d+(?:\.\d+)?)\b", l, re.IGNORECASE)
-        if m:
-            return m.group(3)
+        if re.search(r"\b(BUY|SELL)(?:\s+(LIMIT|STOP))?\s+(-?\d+(?:\.\d+)?)\b", l, re.IGNORECASE):
+            m = re.search(r"(-?\d+(?:\.\d+)?)", l)
+            if m:
+                return m.group(1)
     return None
 
 
@@ -92,15 +143,10 @@ def extract_tps(lines: List[str]) -> List[str]:
     tps: List[str] = []
     for l in lines:
         if any(k in l.lower() for k in TP_KEYS):
-            tps.extend([n for n in re.findall(NUM_RE, l)])
-    # handle separate lines like TP1: 123
-    if not tps:
-        for l in lines:
-            m = re.match(r"^\s*TP\d+\s*[:\-]\s*(-?\d+(?:\.\d+)?)\s*$", l, re.IGNORECASE)
-            if m:
-                tps.append(m.group(1))
-    # limit to 4 tps
-    return tps[:4]
+            nums = re.findall(NUM_RE, l)
+            if nums:
+                tps.append(nums[0])
+    return tps
 
 
 def extract_rr(text: str) -> Optional[str]:
@@ -111,140 +157,308 @@ def extract_rr(text: str) -> Optional[str]:
 
 
 def looks_like_update(text: str) -> bool:
-    return any(key in (text or "").lower() for key in NON_SIGNAL_HINTS)
+    t = (text or "").lower()
+    return any(key in t for key in NON_SIGNAL_HINTS)
 
 
-def is_valid(sig: Dict) -> bool:
-    return all([sig.get("symbol"), sig.get("position"), sig.get("entry"), sig.get("sl")]) and len(sig.get("tps", [])) >= 1
+def is_valid(signal: Dict) -> bool:
+    return all([
+        signal.get("symbol"),
+        signal.get("position"),
+        signal.get("entry"),
+        signal.get("sl"),
+    ]) and len(signal.get("tps", [])) >= 1
 
 
-def to_unified(sig: Dict, chat_id: int, skip_rr_for: Iterable[int] = ()) -> str:
-    parts = [f"📊 #{sig['symbol']}", f"📉 Position: {sig['position'].title()}"]
-    rr = sig.get("rr")
+def to_unified(signal: Dict, chat_id: int, skip_rr_for: Iterable[int] = ()) -> str:
+    parts: List[str] = []
+    parts.append(f"📊 #{signal['symbol']}")
+    parts.append(f"📉 Position: {signal['position']}")
+    rr = signal.get("rr")
     if rr and chat_id not in set(skip_rr_for):
         parts.append(f"❗️ R/R : {rr}")
-    parts.append(f"\n💲 Entry Price : {sig['entry']}")
-    for i, tp in enumerate(sig["tps"], 1):
+    parts.append(f"💲 Entry Price : {signal['entry']}")
+    for i, tp in enumerate(signal["tps"], 1):
         parts.append(f"✔️ TP{i} : {tp}")
-    parts.append(f"\n🚫 Stop Loss : {sig['sl']}")
+    parts.append(f"🚫 Stop Loss : {signal['sl']}")
     return "\n".join(parts)
 
 
 def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Optional[str]:
     if looks_like_update(text):
+        log.info("IGNORED (update/noise)")
         return None
+
     lines = [l.strip() for l in (text or "").splitlines() if l and l.strip()]
+    if not lines:
+        log.info("IGNORED (empty)")
+        return None
+
     symbol = guess_symbol(text) or ""
     position = guess_position(text) or ""
     entry = extract_entry(lines) or ""
     sl = extract_sl(lines) or ""
     tps = extract_tps(lines)
     rr = extract_rr(text)
-    sig = {"symbol": symbol, "position": position, "entry": entry, "sl": sl, "tps": tps, "rr": rr}
-    if not is_valid(sig):
+
+    signal = {
+        "symbol": symbol,
+        "position": position,
+        "entry": entry,
+        "sl": sl,
+        "tps": tps,
+        "rr": rr,
+    }
+    if not is_valid(signal):
+        log.info(f"IGNORED (invalid) -> {signal}")
         return None
+
     try:
         e = float(entry)
-        if position.startswith("SELL") and all(float(tp) > e for tp in tps):
-            return None
-        if position.startswith("BUY") and all(float(tp) < e for tp in tps):
-            return None
+        if position.upper().startswith("SELL"):
+            if all(float(tp) > e for tp in tps):
+                log.info("IGNORED (sell but all TP > entry)")
+                return None
+        if position.upper().startswith("BUY"):
+            if all(float(tp) < e for tp in tps):
+                log.info("IGNORED (buy but all TP < entry)")
+                return None
     except Exception:
         pass
-    return to_unified(sig, chat_id, skip_rr_for)
+
+    return to_unified(signal, chat_id, skip_rr_for)
 
 
-# ---------- Channel helpers ----------
-def _norm_peer(x: Union[int, str]) -> Union[int, str]:
+# ----------------------------------------------------------------------------
+# Channel identifier normalisation
+# ----------------------------------------------------------------------------
+
+def _norm_chat_identifier(x: Union[int, str]) -> Union[int, str]:
+    """Normalise channel identifiers.
+
+    Accepts `@username`, `https://t.me/username`, or raw numeric IDs.  The
+    leading `@` and URL parts are stripped.  Numeric IDs are returned
+    untouched.
+    """
     if isinstance(x, int):
-        return x if x < 0 else int("-100" + str(x))
+        return x
     s = (x or "").strip()
+    # Remove `https://t.me/` prefix if present
     s = re.sub(r"^https?://t\.me/", "", s, flags=re.IGNORECASE)
-    s = s.lstrip("@")
+    # Remove leading '@'
+    s = s.lstrip("@").strip()
     return s
 
 
-# ---------- Bot ----------
+def _coerce_channel_id(x: Union[int, str]) -> Union[int, str]:
+    """Coerce numeric chat IDs to the negative channel ID format.
+
+    Telegram uses `-100XXXXXXXXXX` for supergroups and channels.  If the
+    caller passes a positive integer ID, it is converted automatically.
+    """
+    if isinstance(x, int):
+        return x if x < 0 else int("-100" + str(x))
+    return x
+
+
+# ----------------------------------------------------------------------------
+# SignalBot class
+# ----------------------------------------------------------------------------
+
 class SignalBot:
+    """A Telethon-based bot that forwards or copies signals from source channels."""
+
     def __init__(
         self,
         api_id: int,
         api_hash: str,
         session_name: str,
         from_channels: Iterable[Union[int, str]],
-        to_channels: Iterable[Union[int, str]],
+        to_channel: Union[int, str],
         skip_rr_chat_ids: Iterable[int] = (),
     ):
         self.api_id = api_id
         self.api_hash = api_hash
-        self.session_name = session_name or "signal_bot"
-        self.from_channels = [_norm_peer(c) for c in from_channels]
-        self.to_channels = [_norm_peer(c) for c in to_channels]
-        self.skip_rr_chat_ids = set(int(x) for x in skip_rr_chat_ids or [])
-        self._client: TelegramClient | None = None
+        self.session_name = session_name
+
+        # Normalise source identifiers
+        norm_from: List[Union[int, str]] = []
+        for c in (from_channels or []):
+            c = _norm_chat_identifier(c)
+            c = _coerce_channel_id(c)
+            norm_from.append(c)
+        self.from_channels = norm_from
+
+        # Normalise destination identifier
+        tc = _norm_chat_identifier(to_channel)
+        tc = _coerce_channel_id(tc)
+        self.to_channel = tc
+
+        self.skip_rr_chat_ids = set(skip_rr_chat_ids)
+        self.client: Optional[TelegramClient] = None
         self._running = False
-        self._loop = None
+        self._callback: Optional[Callable[[dict], None]] = None
 
-    def _ensure_session_file(self):
-        b64 = os.environ.get("TG_SESSION_BASE64")
-        if not b64:
-            return
-        path = f"{self.session_name}.session"
-        if not os.path.exists(path):
-            try:
-                with open(path, "wb") as f:
-                    f.write(base64.b64decode(b64))
-                log.info("Session file restored from TG_SESSION_BASE64.")
-            except Exception as e:
-                log.error(f"Failed to restore session: {e}")
+    # ------------------------------------------------------------------
+    # Callback registration
+    # ------------------------------------------------------------------
+    def set_on_signal(self, callback: Optional[Callable[[dict], None]]):
+        self._callback = callback
 
+    # ------------------------------------------------------------------
+    # State queries
+    # ------------------------------------------------------------------
     def is_running(self) -> bool:
         return self._running
 
-    async def _run(self):
-        self._ensure_session_file()
-        bot_token = os.environ.get("BOT_TOKEN")
-        self._client = TelegramClient(self.session_name, int(self.api_id), self.api_hash)
-        if bot_token:
-            await self._client.start(bot_token=bot_token)
-        else:
-            await self._client.start()
+    # ------------------------------------------------------------------
+    # Stop the bot
+    # ------------------------------------------------------------------
+    def stop(self):
+        if self.client:
+            try:
+                fut = asyncio.run_coroutine_threadsafe(
+                    self.client.disconnect(), self.client.loop
+                )
+                fut.result(timeout=10)
+                log.info("Client disconnected.")
+            except Exception as e:
+                log.error(f"Error during disconnect: {e}")
+        self._running = False
 
-        @self._client.on(events.NewMessage(chats=self.from_channels))
+    # ------------------------------------------------------------------
+    # Start the bot
+    # ------------------------------------------------------------------
+    def start(self):
+        if self._running:
+            log.info("Bot already running.")
+            return
+
+        # Create an event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        # Instantiate Telethon client with the provided session name.
+        self.client = TelegramClient(self.session_name, self.api_id, self.api_hash)
+        skip_rr_for = self.skip_rr_chat_ids
+
+        @self.client.on(events.NewMessage(chats=self.from_channels))
         async def handler(event):
+            """Handle incoming messages, parse and forward/copy them."""
             try:
                 text = event.message.message or ""
-                chat = await event.get_chat()
-                chat_id = getattr(chat, "id", 0)
-                fmt = parse_signal(text, chat_id, self.skip_rr_chat_ids)
-                if not fmt:
-                    return
-                for dest in self.to_channels:
+                snippet = text[:160].replace("\n", " ")
+                log.info(f"MSG from {event.chat_id}: {snippet} ...")
+                formatted = parse_signal(text, event.chat_id, skip_rr_for)
+                if formatted:
+                    # First attempt: send as a simple text message.  Most
+                    # channels allow this even if forwarding is disabled.
                     try:
-                        await self._client.send_message(dest, fmt)
-                    except (ChatWriteForbiddenError, ChatAdminRequiredError, ChannelPrivateError):
-                        continue
+                        await self.client.send_message(self.to_channel, formatted)
+                        log.info(f"SENT to {self.to_channel}")
+                    except (ChatWriteForbiddenError, ChatAdminRequiredError) as e:
+                        log.error(f"Send failed (permissions): {e}")
                     except Exception as e:
-                        log.error(f"Send error to {dest}: {e}")
+                        # Fallback: copy media if present
+                        # Forwarding failed (likely due to content protection); attempt to copy
+                        log.warning(f"Send failed (will attempt copy): {e}")
+                        try:
+                            # If there's media, copy it.  Otherwise resend text.
+                            if event.message.media:
+                                await self.client.send_file(
+                                    self.to_channel,
+                                    event.message.media,
+                                    caption=formatted,
+                                    force_document=False,
+                                    allow_cache=False,
+                                )
+                            else:
+                                await self.client.send_message(
+                                    self.to_channel, formatted
+                                )
+                            log.info(f"COPIED to {self.to_channel}")
+                        except Exception as copy_err:
+                            log.error(f"Copy failed: {copy_err}")
+                    # Invoke callback after sending
+                    if self._callback:
+                        try:
+                            self._callback(
+                                {
+                                    "source_chat_id": str(event.chat_id),
+                                    "text": formatted,
+                                }
+                            )
+                        except Exception:
+                            pass
             except Exception as e:
                 log.error(f"Handler error: {e}")
 
         self._running = True
-        log.info("Signal bot started.")
-        await self._client.run_until_disconnected()
+        log.info("Starting Telegram client...")
+        self.client.start()
+
+        # Verification: log information about all configured channels.
+        async def _verify():
+            # Sources
+            for c in self.from_channels:
+                try:
+                    ent = await self.client.get_entity(c)
+                    title = getattr(ent, "title", str(ent))
+                    cid = getattr(ent, "id", c)
+                    log.info(f"Listening source: {title} (id={cid})")
+                except ChannelPrivateError:
+                    log.error(
+                        f"Cannot access source '{c}': ChannelPrivateError (not a participant or channel is private)."
+                    )
+                except Exception as e:
+                    log.error(f"Cannot access source '{c}': {e}")
+            # Destination
+            try:
+                ent = await self.client.get_entity(self.to_channel)
+                title = getattr(ent, "title", str(ent))
+                cid = getattr(ent, "id", self.to_channel)
+                log.info(f"Destination: {title} (id={cid})")
+            except Exception as e:
+                log.error(f"Cannot access destination '{self.to_channel}': {e}")
+
+        self.client.loop.run_until_complete(_verify())
+
+        log.info("Client started. Waiting for messages...")
+        # Block until disconnected
+        self.client.run_until_disconnected()
+        log.info("Client disconnected (run_until_disconnected returned).")
         self._running = False
-        log.info("Signal bot stopped.")
 
-    def start(self):
-        if self._running:
-            return
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._run())
 
-    def stop(self):
-        try:
-            if self._client:
-                self._loop.call_soon_threadsafe(self._client.disconnect)
-        except Exception:
-            pass
+# ------------------------------------------------------------------------------
+# Standalone run for debugging
+# ------------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    # When executed directly, read configuration from environment variables.
+    import os
+    api_id = int(os.environ.get("API_ID", "29278288"))
+    api_hash = os.environ.get(
+        "API_HASH", "8baff9421321d1ef6f14b0511209fbe2"
+    )
+    session_name = os.environ.get("SESSION_NAME", "signal_bot")
+    sources_env = os.environ.get("SOURCES", "[1467736193]")
+    dests_env = os.environ.get("DESTS", "[2123816390]")
+    try:
+        import json
+        from_channels = json.loads(sources_env)
+        dests = json.loads(dests_env)
+        to_channel = dests[0] if dests else ""
+    except Exception:
+        from_channels = []
+        to_channel = ""
+    skip_rr_for: set[int] = set()
+    bot = SignalBot(
+        api_id,
+        api_hash,
+        session_name,
+        from_channels,
+        to_channel,
+        skip_rr_for,
+    )
+    bot.start()
