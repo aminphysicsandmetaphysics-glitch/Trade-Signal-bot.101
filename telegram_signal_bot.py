@@ -287,6 +287,18 @@ async def main() -> None:
     api_id = os.environ.get('TG_API_ID')
     api_hash = os.environ.get('TG_API_HASH')
     session_name = os.environ.get('TG_SESSION', 'session')
+       session_b64 = os.environ.get('TG_SESSION_BASE64')
+    session_file = f"{session_name}.session"
+    if session_b64 and not os.path.exists(session_file):
+        try:
+            import base64
+            decoded = base64.b64decode(session_b64)
+            with open(session_file, 'wb') as f:
+                f.write(decoded)
+            print(f"Decoded session data written to {session_file}")
+        except Exception as e:
+            # Log and continue; if decoding fails the bot will prompt for login
+            print(f"Failed to decode TG_SESSION_BASE64: {e}")
     if not api_id or not api_hash:
         raise RuntimeError('TG_API_ID and TG_API_HASH must be set in the environment')
 
