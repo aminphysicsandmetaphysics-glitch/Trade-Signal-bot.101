@@ -122,28 +122,20 @@ def extract_tps(lines: List[str]) -> List[str]:
     tps: List[str] = []
     for l in lines:
         if any(k in l.lower() for k in TP_KEYS):
-            # 1) حالت استاندارد: عدد بلافاصله بعد از "TP" و ":" یا "-"
-            found = re.findall(r"(?i)\bTP\s*\d*\s*[:\-]\s*(-?\d+(?:\.\d+)?)", l)
-            # 2) حالت "Tp: 3426.00 (400 pips)"
-            if not found:
-                m = re.search(r"(?i)\btp\b\s*[:\-]\s*(-?\d+(?:\.\d+)?)", l)
-                if m:
-                    found = [m.group(1)]
-            # 3) آخرین راه: حذف برچسب‌های "TP1/TP2/..." و نادیده گرفتن "pips"
-            if not found:
-                cleaned = re.sub(r"(?i)\bTP\s*\d+\b", "", l)
-                # همه‌ی اعداد، به‌جز آنهایی که کنارشان pips آمده
-                candidates = re.findall(r"(-?\d+(?:\.\d+)?)", cleaned)
-                found = [
-                    n for n in candidates
-                    if not re.search(rf"{re.escape(n)}\s*(?:pips?)\b", cleaned, re.IGNORECASE)
-                ]
-            # سقف منطقی و افزودن با حفظ ترتیب
-            for n in found[:3]:
-                if n not in tps:
-                    tps.append(n)
-    return tps
-
+            # همه اعداد همان خط را بگیر (ممکن است چند TP در یک خط باشد)
+            nums = [n for n in re.findall(NUM_RE, l)]
+            if nums:
+                # معمولاً اولین‌ها TPها هستند؛ بقیه (مثل "80 pips") ممکن است همراه شوند
+                # با این حال، در اکثر سیگنال‌ها هر TP در یک خط جدا می‌آید
+                tps.extend(nums[:3])  # سقف منطقی
+    # حذف تکراری‌های احتمالی و حفظ ترتیب
+    seen = set()
+    uniq: List[str] = []
+    for x in tps:
+        if x not in seen:
+            uniq.append(x)
+            seen.add(x)
+    return uniq
 
 
 def extract_rr(text: str) -> Optional[str]:
