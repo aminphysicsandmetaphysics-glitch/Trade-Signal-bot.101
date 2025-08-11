@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Trade Signal Bot</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:#0b0d12;color:#e8eaf0;margin:0}
+    .wrap{max-width:900px;margin:32px auto;padding:0 16px}
+    .card{background:#12151d;border:1px solid #22283a;border-radius:16px;padding:20px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+    input,textarea{width:100%;background:#0b0f18;border:1px solid #273047;border-radius:10px;color:#eef;padding:10px;margin:6px 0 14px}
+    button{background:#4e7aff;border:none;color:#fff;padding:10px 16px;border-radius:10px;cursor:pointer}
+    button.secondary{background:#2d374b}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .pill{display:inline-block;background:#1f2637;border:1px solid #2d3750;border-radius:999px;padding:6px 12px;margin-left:8px}
+    .ok{color:#39d353}.warn{color:#ffcc00}.err{color:#ff6b6b}
+    .toolbar{display:flex;gap:10px;align-items:center}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    {% block content %}{% endblock %}
+  </div>
+</div>
+</body>
+</html>

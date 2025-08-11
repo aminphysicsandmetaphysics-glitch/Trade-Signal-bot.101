@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Trade Signal Bot</h2>
+<p>
+  وضعیت:
+  {% if running %}<span class="pill ok">Running</span>{% else %}<span class="pill warn">Stopped</span>{% endif %}
+</p>
+
+<form action="{{ url_for('save') }}" method="post">
+  <div class="row">
+    <div>
+      <label>API ID</label>
+      <input name="api_id" value="{{ cfg.api_id or '' }}" required />
+    </div>
+    <div>
+      <label>API HASH</label>
+      <input name="api_hash" value="{{ cfg.api_hash or '' }}" required />
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label>Session name</label>
+      <input name="session_name" value="{{ cfg.session_name or 'signal_bot' }}" />
+    </div>
+    <div>
+      <label>Skip R/R chat IDs (JSON list)</label>
+      <input name="skip_rr" value="{{ cfg.skip_rr or '[]' }}" />
+    </div>
+  </div>
+  <label>From channels (JSON list: ["hfjfdjjdd","GOLD EXCLUSIVE VIP",1467736193])</label>
+  <textarea name="from_channels" rows="3">{{ cfg.from_channels or '[]' }}</textarea>
+  <label>To channels (JSON list: [1467736193,2123816390,1286609636,"@sjkalalsk"])</label>
+  <textarea name="to_channels" rows="3">{{ cfg.to_channels or '[]' }}</textarea>
+  <div class="toolbar">
+    <button type="submit">💾 ذخیره تنظیمات</button>
+    <form action="{{ url_for('start') }}" method="post" style="display:inline">
+      <button formaction="{{ url_for('start') }}">▶️ Start</button>
+    </form>
+    <form action="{{ url_for('stop') }}" method="post" style="display:inline">
+      <button class="secondary" formaction="{{ url_for('stop') }}">⏹ Stop</button>
+    </form>
+  </div>
+</form>
+{% endblock %}
