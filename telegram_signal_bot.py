@@ -283,9 +283,9 @@ def is_signal_message(text: str) -> bool:
 
 async def main() -> None:
     """Main asynchronous entry point for the bot."""
-    # Load API credentials from environment variables
-    api_id = os.environ.get('TG_API_ID')
-    api_hash = os.environ.get('TG_API_HASH')
+    # Load api_hash credentials from environment variables
+      api_id = os.environ.get('TG_API  _ID')
+      api_hash = os.environ.get('TG_API_HASH')
     session_name = os.environ.get('TG_SESSION', 'session')
        session_b64 = os.environ.get('TG_SESSION_BASE64')
     session_file = f"{session_name}.session"
