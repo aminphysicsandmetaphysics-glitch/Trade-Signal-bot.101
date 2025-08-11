@@ -1,207 +1,231 @@
+"""Telethon wrapper for forwarding and parsing trading signals.
+
+This module encapsulates all Telegram interaction.  It normalises
+channel identifiers, listens to new messages from a list of source
+channels and forwards or copies them to a single destination channel.
+
+When forwarding fails due to content protection, the bot will fall
+back to copying the text and any attached media.
+"""
+
 from __future__ import annotations
+
 import asyncio
 import logging
-import os
 import re
-import unicodedata
-from typing import List, Optional, Iterable, Union, Callable
+from typing import List, Dict, Optional, Iterable, Callable, Union
 
 from telethon import TelegramClient, events
-from telethon.errors import ChatAdminRequiredError, ChatWriteForbiddenError, ChannelPrivateError
-from telethon.errors.rpcerrorlist import FloodWaitError
-from telethon.sessions import StringSession
+from telethon.errors import (
+    ChannelPrivateError,
+    ChatAdminRequiredError,
+    ChatWriteForbiddenError,
+)
 
-# ---------------------- Logging ----------------------
+# ----------------------------------------------------------------------------
+# Logging
+# ----------------------------------------------------------------------------
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger("signal-bot")
 
-# ---------------------- Normalization helpers ----------------------
-_PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
-_ARABIC_DIGITS  = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+# ----------------------------------------------------------------------------
+# Signal parsing (REPLACED / IMPROVED)
+# ----------------------------------------------------------------------------
 
-def normalize_text(s: str | None) -> str:
-    """Unicode NFKC + trim + unify colon/dash + remove zero-width + normalize digits + compress spaces."""
-    if not s:
-        return ""
-    s = unicodedata.normalize("NFKC", s)
-    s = re.sub(r"[\u200b\u200c\u200d\u2060]", "", s)                 # zero-width
-    s = s.translate(_PERSIAN_DIGITS).translate(_ARABIC_DIGITS)       # digits
-    s = s.replace("：", ":")
-    s = re.sub(r"[‐‑‒–—]", "-", s)                                   # unify dashes
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
+# نمادها/سیمبل‌ها
+PAIR_RE = re.compile(
+    r"(#?\b(?:XAUUSD|XAGUSD|GOLD|SILVER|USOIL|UKOIL|[A-Z]{3,5}[/ ]?[A-Z]{3,5}|[A-Z]{3,5}USD|USD[A-Z]{3,5})\b)"
+)
+# عدد
+NUM_RE = re.compile(r"(-?\d+(?:\.\d+)?)")
+# R/R
+RR_RE = re.compile(
+    r"(\b(?:R\s*/\s*R|Risk[- ]?Reward|Risk\s*:\s*Reward)\b[^0-9]*?(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?))",
+    re.IGNORECASE,
+)
 
-def split_lines(raw: str) -> List[str]:
-    if not raw:
-        return []
-    txt = raw.replace("\r\n", "\n").replace("\r", "\n")
-    return [l.strip() for l in txt.split("\n") if l.strip()]
+# حالت‌های پوزیشن
+POS_VARIANTS = [
+    ("BUY LIMIT", "Buy Limit"),
+    ("SELL LIMIT", "Sell Limit"),
+    ("BUY STOP", "Buy Stop"),
+    ("SELL STOP", "Sell Stop"),
+    ("BUY", "Buy"),
+    ("SELL", "Sell"),
+]
 
-def to_float_str(num: str) -> Optional[str]:
-    if not num:
-        return None
-    n = num.strip().replace(",", ".")
-    try:
-        float(n)
-        return n
-    except Exception:
-        return None
+# کلیدواژه‌های نویز/آپدیت/تبلیغ که باید نادیده بگیریم
+NON_SIGNAL_HINTS = [
+    "activated", "tp reached", "result so far", "screenshots", "cheers", "high-risk setup",
+    "move sl", "put your sl", "risk free", "close", "closed", "delete", "running",
+    "trade - update", "update", "guide", "watchlist", "broker", "subscription", "contact", "admin",
+    "tp almost", "tp hit", "tp reached", "sl reached", "sl hit", "profits", "week", "friday",
+]
 
-def is_probable_price(s: str) -> bool:
-    s = (s or "").strip().replace(",", ".")
-    try:
-        v = float(s)
-        # قیمت معنادار: یا اعشاری است یا قدرمطلق >= 10
-        return ("." in s) or (abs(v) >= 10)
-    except Exception:
-        return False
+TP_KEYS = ["tp", "take profit", "take-profit", "t/p", "t p"]
+SL_KEYS = ["sl", "stop loss", "stop-loss", "s/l", "s l"]
+ENTRY_KEYS = ["entry price", "entry", "e:"]
 
-# ---------------------- Parsing ----------------------
-HASHTAG_SYM = re.compile(r"#([A-Za-z0-9_./-]{2,20})")
-PAIR_RE     = re.compile(r"\b([A-Z]{3,5}/?[A-Z]{3,5}|GOLD|SILVER|USOIL|UKOIL|WTI|BRENT)\b", re.IGNORECASE)
 
-POS_RE = re.compile(r"(?i)\b(?:(BUY|SELL)\s*(LIMIT|STOP)?|(LONG|SHORT))\b")
-NUM_RE = re.compile(r"(-?\d+(?:[.,]\d{1,5})?)")
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip()
 
-ENTRY_KEYS = re.compile(r"(?i)\b(entry(?:\s*price)?|^E[:=])\b")
-SL_KEYS    = re.compile(r"(?i)\b(sl|stop\s*loss|stop)\b")
-TP_KEYS    = re.compile(r"(?i)\b(tp\d*|take\s*profit|t/p|t\s*p)\b")
 
-RR_RE = re.compile(r"(?i)\b(?:R\s*/\s*R|Risk\s*[-/:]?\s*Reward|R\s*[:/])[^0-9]*?(\d+(?:[.,]\d{1,5})?)\s*[:/]\s*(\d+(?:[.,]\d{1,5})?)\b")
-
-NOISE_HINTS = re.compile(r"(?i)\b(activated|update|result\s+so\s+far|watchlist|broker|subscription|contact|admin|giveaway|rules|join\s+channel|news)\b")
-
-def first_symbol(text: str) -> Optional[str]:
-    m = HASHTAG_SYM.search(text)
-    if m:
-        return m.group(1).upper()
-    m = PAIR_RE.search(text)
-    if m:
-        return m.group(1).upper().replace("/", "")
-    return None
-
-def find_position(text: str) -> Optional[str]:
-    m = POS_RE.search(text)
+def guess_symbol(text: str) -> Optional[str]:
+    m = PAIR_RE.search((text or "").upper())
     if not m:
         return None
-    buy_sell, limstop, long_short = m.group(1), m.group(2), m.group(3)
-    if long_short:
-        return "BUY" if long_short.upper() == "LONG" else "SELL"
-    if buy_sell:
-        base = buy_sell.upper()
-        if limstop:
-            return f"{base} {limstop.title()}"
-        return base
+    sym = m.group(1).upper().lstrip("#").replace(" ", "").replace("/", "")
+    if sym == "GOLD":
+        sym = "XAUUSD"
+    return sym
+
+
+def guess_position(text: str) -> Optional[str]:
+    up = (text or "").upper()
+    for raw, norm in POS_VARIANTS:
+        if raw in up:
+            return norm
+    if re.search(r"\bBUY\b", up):
+        return "Buy"
+    if re.search(r"\bSELL\b", up):
+        return "Sell"
     return None
 
-def extract_entry(lines: List[str], text: str) -> Optional[str]:
+
+def extract_entry(lines: List[str]) -> Optional[str]:
+    # حالت‌های صریح Entry
     for l in lines:
-        if ENTRY_KEYS.search(l):
+        if any(k in l.lower() for k in ENTRY_KEYS):
             m = NUM_RE.search(l)
-            if m and is_probable_price(m.group(1)):
-                return to_float_str(m.group(1))
+            if m:
+                return m.group(1)
+    # حالت فشرده مثل: "BUY 3373.33" یا "SELL LIMIT 3338"
+    for l in lines:
+        if re.search(r"\b(BUY|SELL)(?:\s+(LIMIT|STOP))?\s+(-?\d+(?:\.\d+)?)\b", l, re.IGNORECASE):
+            m = re.search(r"(-?\d+(?:\.\d+)?)", l)
+            if m:
+                return m.group(1)
     return None
+
 
 def extract_sl(lines: List[str]) -> Optional[str]:
     for l in lines:
-        if SL_KEYS.search(l):
+        if any(k in l.lower() for k in SL_KEYS):
             m = NUM_RE.search(l)
-            if m and is_probable_price(m.group(1)):
-                return to_float_str(m.group(1))
+            if m:
+                return m.group(1)
     return None
 
-def extract_tps(lines: List[str], text: str) -> List[str]:
+
+def extract_tps(lines: List[str]) -> List[str]:
     tps: List[str] = []
     for l in lines:
-        # حذف خطوطی که احتمال نویز قوی دارند (R/R، تاریخ با ایموجی، …)
-        if "R/R" in l or "Risk" in l or "Reward" in l or "🗓" in l:
-            continue
-        if TP_KEYS.search(l):
-            nums = NUM_RE.findall(l)
-            for n in nums:
-                if is_probable_price(n):
-                    tps.append(to_float_str(n))
-                    break  # فقط اولین عدد معتبر هر خط
-    if not tps:
-        m = re.search(r"(?i)\bTP[:\s]+(-?\d+(?:[.,]\d{1,5})?)\b", text)
-        if m and is_probable_price(m.group(1)):
-            tps.append(to_float_str(m.group(1)))
-    # de-dup
-    seen, ordered = set(), []
+        if any(k in l.lower() for k in TP_KEYS):
+            # همه اعداد همان خط را بگیر (ممکن است چند TP در یک خط باشد)
+            nums = [n for n in re.findall(NUM_RE, l)]
+            if nums:
+                # معمولاً اولین‌ها TPها هستند؛ بقیه (مثل "80 pips") ممکن است همراه شوند
+                # با این حال، در اکثر سیگنال‌ها هر TP در یک خط جدا می‌آید
+                tps.extend(nums[:3])  # سقف منطقی
+    # حذف تکراری‌های احتمالی و حفظ ترتیب
+    seen = set()
+    uniq: List[str] = []
     for x in tps:
         if x not in seen:
+            uniq.append(x)
             seen.add(x)
-            ordered.append(x)
-    return ordered
+    return uniq
+
 
 def extract_rr(text: str) -> Optional[str]:
-    m = RR_RE.search(text)
-    if not m:
-        return None
-    a = to_float_str(m.group(1))
-    b = to_float_str(m.group(2))
-    if a and b:
-        return f"{a}/{b}"
+    m = RR_RE.search(text or "")
+    if m:
+        return f"{m.group(2)}/{m.group(3)}"
     return None
 
-def validate_signal(symbol: Optional[str], position: Optional[str],
-                    entry: Optional[str], sl: Optional[str], tps: List[str]) -> bool:
-    if not (symbol and position and entry and sl and tps):
-        return False
-    if not (is_probable_price(entry) and is_probable_price(sl)):
-        return False
-    if not all(is_probable_price(tp) for tp in tps):
-        return False
-    try:
-        e = float(entry); s = float(sl); tt = [float(x) for x in tps]
-        pos = position.upper()
-        if "SELL" in pos and not all(tp <= e + 1e-9 for tp in tt):
-            return False
-        if "BUY" in pos and not all(tp >= e - 1e-9 for tp in tt):
-            return False
-    except Exception:
-        return False
-    return True
 
-def format_output(symbol: str, position: str, entry: str, sl: str,
-                  tps: List[str], rr: Optional[str], chat_id: int,
-                  skip_rr_for: Iterable[int]) -> str:
-    lines = []
-    lines.append(f"📊 #{symbol}")
-    lines.append(f"📉 Position: {position.upper()}")
-    if rr and (chat_id not in set(skip_rr_for)):
-        lines.append(f"❗️ R/R : {rr}")
-    lines.append(f"💲 Entry Price : {entry}")
-    if len(tps) == 1:
-        lines.append(f"✔️ TP : {tps[0]}")
-    else:
-        for i, tp in enumerate(tps, 1):
-            lines.append(f"✔️ TP{i} : {tp}")
-    lines.append(f"🚫 Stop Loss : {sl}")
-    return "\n".join(lines)
+def looks_like_update(text: str) -> bool:
+    t = (text or "").lower()
+    return any(key in t for key in NON_SIGNAL_HINTS)
+
+
+def is_valid(signal: Dict) -> bool:
+    return all([
+        signal.get("symbol"),
+        signal.get("position"),
+        signal.get("entry"),
+        signal.get("sl"),
+    ]) and len(signal.get("tps", [])) >= 1
+
+
+def to_unified(signal: Dict, chat_id: int, skip_rr_for: Iterable[int] = ()) -> str:
+    parts: List[str] = []
+    parts.append(f"📊 #{signal['symbol']}")
+    parts.append(f"📉 Position: {signal['position']}")
+    rr = signal.get("rr")
+    if rr and chat_id not in set(skip_rr_for):
+        parts.append(f"❗️ R/R : {rr}")
+    parts.append(f"💲 Entry Price : {signal['entry']}")
+    for i, tp in enumerate(signal["tps"], 1):
+        parts.append(f"✔️ TP{i} : {tp}")
+    parts.append(f"🚫 Stop Loss : {signal['sl']}")
+    return "\n".join(parts)
+
 
 def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Optional[str]:
-    if not text or NOISE_HINTS.search(text):
-        return None
-    raw_lines = split_lines(text)
-    norm_text = normalize_text(text)
-    lines = split_lines(norm_text)
-
-    symbol = first_symbol(norm_text)
-    position = find_position(norm_text)
-    entry = extract_entry(lines, norm_text)
-    sl = extract_sl(lines)
-    tps = extract_tps(lines, norm_text)
-    rr = extract_rr(norm_text)
-
-    if not validate_signal(symbol, position, entry, sl, tps):
-        log.info(f"IGNORED (not a valid signal) -> sym={symbol}, pos={position}, entry={entry}, sl={sl}, tps={tps}")
+    # حذف پیام‌های غیرسیگنال (آپدیت/تبلیغ/نتیجه)
+    if looks_like_update(text):
+        log.info("IGNORED (update/noise)")
         return None
 
-    return format_output(symbol, position, entry, sl, tps, rr, chat_id, skip_rr_for)
+    lines = [l.strip() for l in (text or "").splitlines() if l and l.strip()]
+    if not lines:
+        log.info("IGNORED (empty)")
+        return None
 
-# ---------------------- Channel normalization ----------------------
+    symbol = guess_symbol(text) or ""
+    position = guess_position(text) or ""
+    entry = extract_entry(lines) or ""
+    sl = extract_sl(lines) or ""
+    tps = extract_tps(lines)
+    rr = extract_rr(text)
+
+    signal = {
+        "symbol": symbol,
+        "position": position,
+        "entry": entry,
+        "sl": sl,
+        "tps": tps,
+        "rr": rr,
+    }
+
+    if not is_valid(signal):
+        log.info(f"IGNORED (invalid) -> {signal}")
+        return None
+
+    # sanity check: جهت TPها با Entry همخوان باشد
+    try:
+        e = float(entry)
+        if position.upper().startswith("SELL"):
+            if all(float(tp) > e for tp in tps):
+                log.info("IGNORED (sell but all TP > entry)")
+                return None
+        if position.upper().startswith("BUY"):
+            if all(float(tp) < e for tp in tps):
+                log.info("IGNORED (buy but all TP < entry)")
+                return None
+    except Exception:
+        pass
+
+    return to_unified(signal, chat_id, skip_rr_for)
+
+# ----------------------------------------------------------------------------
+# Channel identifier normalisation (kept from your version)
+# ----------------------------------------------------------------------------
+
 def _norm_chat_identifier(x: Union[int, str]) -> Union[int, str]:
+    """Normalise channel identifiers: '@name' / 'https://t.me/name' / numeric."""
     if isinstance(x, int):
         return x
     s = (x or "").strip()
@@ -209,91 +233,137 @@ def _norm_chat_identifier(x: Union[int, str]) -> Union[int, str]:
     s = s.lstrip("@").strip()
     return s
 
+
 def _coerce_channel_id(x: Union[int, str]) -> Union[int, str]:
+    """Coerce positive numeric IDs to Telegram channel form -100XXXXXXXXXX."""
     if isinstance(x, int):
         return x if x < 0 else int("-100" + str(x))
     return x
 
-# ---------------------- Bot Class ----------------------
+# ----------------------------------------------------------------------------
+# SignalBot class (kept, with my stability fixes)
+# ----------------------------------------------------------------------------
+
 class SignalBot:
+    """A Telethon-based bot that forwards or copies signals from source channels."""
+
     def __init__(
         self,
         api_id: int,
         api_hash: str,
         session_name: str,
-        from_channels,
-        to_channel,
-        skip_rr_chat_ids: Iterable[int] = ()
+        from_channels: Iterable[Union[int, str]],
+        to_channel: Union[int, str],
+        skip_rr_chat_ids: Iterable[int] = (),
     ):
         self.api_id = api_id
         self.api_hash = api_hash
         self.session_name = session_name
 
-        norm_from = []
+        # Normalise sources
+        norm_from: List[Union[int, str]] = []
         for c in (from_channels or []):
             c = _norm_chat_identifier(c)
             c = _coerce_channel_id(c)
             norm_from.append(c)
         self.from_channels = norm_from
-        # مقصد هم نرمال/اجباری به -100
-        self.to_channel = _coerce_channel_id(_norm_chat_identifier(to_channel))
+
+        # Normalise destination
+        tc = _norm_chat_identifier(to_channel)
+        tc = _coerce_channel_id(tc)
+        self.to_channel = tc
 
         self.skip_rr_chat_ids = set(skip_rr_chat_ids)
         self.client: Optional[TelegramClient] = None
         self._running = False
         self._callback: Optional[Callable[[dict], None]] = None
 
-    def set_on_signal(self, callback: Callable[[dict], None] | None):
+    # Callback
+    def set_on_signal(self, callback: Optional[Callable[[dict], None]]):
         self._callback = callback
 
+    # State
     def is_running(self) -> bool:
         return self._running
 
+    # Stop safely (thread-safe on client loop)
     def stop(self):
         if self.client:
             try:
-                fut = asyncio.run_coroutine_threadsafe(self.client.disconnect(), self.client.loop)
+                fut = asyncio.run_coroutine_threadsafe(
+                    self.client.disconnect(), self.client.loop
+                )
                 fut.result(timeout=10)
                 log.info("Client disconnected.")
             except Exception as e:
                 log.error(f"Error during disconnect: {e}")
         self._running = False
 
+    # Start (with event loop fix)
     def start(self):
         if self._running:
             log.info("Bot already running.")
             return
 
+        # Create an event loop for this thread (Telethon needs current loop)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        # StringSession برای حذف لاک sqlite (اگر ENV موجود بود)
-        session_str = os.getenv("SESSION_STRING", "").strip()
-        if session_str:
-            self.client = TelegramClient(StringSession(session_str), self.api_id, self.api_hash)
-        else:
-            self.client = TelegramClient(self.session_name, self.api_id, self.api_hash)
-
+        self.client = TelegramClient(self.session_name, self.api_id, self.api_hash)
         skip_rr_for = self.skip_rr_chat_ids
 
         @self.client.on(events.NewMessage(chats=self.from_channels))
-        async def on_new_message(event):
-            await self._process_event(event, skip_rr_for)
+        async def handler(event):
+            """Receive, parse, and forward/copy."""
+            try:
+                text = event.message.message or ""
+                snippet = text[:160].replace("\n", " ")
+                log.info(f"MSG from {event.chat_id}: {snippet} ...")
 
-        # Album (grouped media)
-        try:
-            @self.client.on(events.Album(chats=self.from_channels))
-            async def on_album(event):
-                await self._process_event(event, skip_rr_for)
-        except Exception:
-            pass
+                formatted = parse_signal(text, event.chat_id, skip_rr_for)
+                if not formatted:
+                    return
+
+                # Try simple text send first
+                try:
+                    await self.client.send_message(self.to_channel, formatted)
+                    log.info(f"SENT to {self.to_channel}")
+                except (ChatWriteForbiddenError, ChatAdminRequiredError) as e:
+                    log.error(f"Send failed (permissions): {e}")
+                except Exception as e:
+                    # Fallback: copy media (if any) with caption
+                    log.warning(f"Send failed (will attempt copy): {e}")
+                    try:
+                        if event.message.media:
+                            await self.client.send_file(
+                                self.to_channel,
+                                event.message.media,
+                                caption=formatted,
+                                force_document=False,
+                                allow_cache=False,
+                            )
+                        else:
+                            await self.client.send_message(self.to_channel, formatted)
+                        log.info(f"COPIED to {self.to_channel}")
+                    except Exception as copy_err:
+                        log.error(f"Copy failed: {copy_err}")
+
+                if self._callback:
+                    try:
+                        self._callback(
+                            {"source_chat_id": str(event.chat_id), "text": formatted}
+                        )
+                    except Exception:
+                        pass
+            except Exception as e:
+                log.error(f"Handler error: {e}")
 
         self._running = True
         log.info("Starting Telegram client...")
         self.client.start()
 
+        # Verify channels access & log titles/ids
         async def _verify():
-            # Sources
             for c in self.from_channels:
                 try:
                     ent = await self.client.get_entity(c)
@@ -301,10 +371,11 @@ class SignalBot:
                     cid = getattr(ent, "id", c)
                     log.info(f"Listening source: {title} (id={cid})")
                 except ChannelPrivateError:
-                    log.error(f"Cannot access source '{c}': ChannelPrivateError (private/not a participant).")
+                    log.error(
+                        f"Cannot access source '{c}': ChannelPrivateError (not a participant or channel is private)."
+                    )
                 except Exception as e:
                     log.error(f"Cannot access source '{c}': {e}")
-            # Destination
             try:
                 ent = await self.client.get_entity(self.to_channel)
                 title = getattr(ent, "title", str(ent))
@@ -320,48 +391,32 @@ class SignalBot:
         log.info("Client disconnected (run_until_disconnected returned).")
         self._running = False
 
-    async def _process_event(self, event, skip_rr_for):
-        try:
-            text = ""
-            try:
-                if hasattr(event, "message") and event.message:
-                    text = event.message.message or ""
-                elif hasattr(event, "messages") and event.messages:
-                    candidate = event.messages[0]
-                    text = getattr(candidate, "message", "") or ""
-            except Exception:
-                pass
 
-            ntext = normalize_text(text)
-            snippet = (ntext or "")[:200].replace("\n", " ")
-            log.info(f"MSG from {getattr(event, 'chat_id', 'unknown')}: {snippet} ...")
+# ------------------------------------------------------------------------------
+# Standalone run (optional)
+# ------------------------------------------------------------------------------
+if __name__ == "__main__":
+    import os, json
+    api_id = int(os.environ.get("API_ID", "29278288"))
+    api_hash = os.environ.get("API_HASH", "8baff9421321d1ef6f14b0511209fbe2")
+    session_name = os.environ.get("SESSION_NAME", "signal_bot")
+    sources_env = os.environ.get("SOURCES", "[-1001467736193]")
+    dest_env = os.environ.get("DEST", "sjkalalsk")
 
-            formatted = parse_signal(text, getattr(event, "chat_id", 0), skip_rr_for)
-            if formatted:
-                try:
-                    await self.client.send_message(self.to_channel, formatted)
-                    log.info(f"SENT to {self.to_channel}")
-                    if self._callback:
-                        try:
-                            self._callback({
-                                "source_chat_id": str(getattr(event, "chat_id", "")),
-                                "text": formatted
-                            })
-                        except Exception:
-                            pass
-                except (ChatWriteForbiddenError, ChatAdminRequiredError) as e:
-                    log.error(f"Send failed (permissions): {e}")
-                except FloodWaitError as e:
-                    log.warning(f"FloodWait {e.seconds}s. Backing off...")
-                    await asyncio.sleep(e.seconds + 1)
-                    try:
-                        await self.client.send_message(self.to_channel, formatted)
-                        log.info(f"SENT (after wait) to {self.to_channel}")
-                    except Exception as e2:
-                        log.error(f"Send failed after wait: {e2}")
-                except Exception as e:
-                    log.error(f"Send failed: {e}")
-            else:
-                log.info("IGNORED (not classified as signal)")
-        except Exception as e:
-            log.error(f"Handler error: {e}")
+    try:
+        from_channels = json.loads(sources_env)
+    except Exception:
+        from_channels = []
+
+    to_channel = dest_env
+    skip_rr_for: set[int] = {1286609636}  # کانال سوم بدون R/R
+
+    bot = SignalBot(
+        api_id,
+        api_hash,
+        session_name,
+        from_channels,
+        to_channel,
+        skip_rr_for,
+    )
+    bot.start()
