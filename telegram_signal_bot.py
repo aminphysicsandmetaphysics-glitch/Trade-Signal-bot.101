@@ -296,22 +296,22 @@ async def main() -> None:
             with open(session_file, 'wb') as f:
                 f.write(decoded)
             print(f"Decoded session data written to {session_file}")
-        except Exception as e:
-            # Log and continue; if decoding fails the bot will prompt for login
-            print(f"Failed to decode TG_SESSION_BASE64: {e}")
-    if not api_id or not api_hash:
-        raise RuntimeError('TG_API_ID and TG_API_HASH must be set in the environment')
-
-    # Parse source and destination channels from environment
-    raw_sources = os.environ.get('TG_SOURCE_CHANNELS', '')
-    raw_destinations = os.environ.get('TG_DEST_CHANNELS', '')
-    if not raw_sources or not raw_destinations:
-        raise RuntimeError('TG_SOURCE_CHANNELS and TG_DEST_CHANNELS must be set')
-    source_channels: List[str] = [c.strip() for c in raw_sources.split(',') if c.strip()]
-    destination_channels: List[str] = [c.strip() for c in raw_destinations.split(',') if c.strip()]
-
+            except Exception as e:
+                # Log and continue; if decoding fails the bot will prompt for login
+                print(f"Failed to decode TG_SESSION_BASE64: {e}")
+            if not api_id or not api_hash:
+                    raise RuntimeError('TG_API_ID and TG_API_HASH must be set in the environment')
+            
+        # Parse source and destination channels from environment
+        raw_sources = os.environ.get('TG_SOURCE_CHANNELS', '')
+        raw_destinations = os.environ.get('TG_DEST_CHANNELS', '')
+        if not raw_sources or not raw_destinations:
+            raise RuntimeError('TG_SOURCE_CHANNELS and TG_DEST_CHANNELS must be set')
+        source_channels: List[str] = [c.strip() for c in raw_sources.split(',') if c.strip()]
+        destination_channels: List[str] = [c.strip() for c in raw_destinations.split(',') if c.strip()]
+    
     # Initialize the Telegram client
-    client = TelegramClient(session_name, int(api_id), api_hash)
+        client = TelegramClient(session_name, int(api_id), api_hash)
 
     @client.on(events.NewMessage(chats=source_channels))
     async def handler(event: events.NewMessage.Event) -> None:
