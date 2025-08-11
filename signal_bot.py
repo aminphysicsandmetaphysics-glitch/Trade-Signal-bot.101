@@ -121,14 +121,31 @@ def extract_sl(lines: List[str]) -> Optional[str]:
 def extract_tps(lines: List[str]) -> List[str]:
     tps: List[str] = []
     for l in lines:
-        if any(k in l.lower() for k in TP_KEYS):
-            # همه اعداد همان خط را بگیر (ممکن است چند TP در یک خط باشد)
-            nums = [n for n in re.findall(NUM_RE, l)]
-            if nums:
-                # معمولاً اولین‌ها TPها هستند؛ بقیه (مثل "80 pips") ممکن است همراه شوند
-                # با این حال، در اکثر سیگنال‌ها هر TP در یک خط جدا می‌آید
-                tps.extend(nums[:3])  # سقف منطقی
-    # حذف تکراری‌های احتمالی و حفظ ترتیب
+        ll = l.lower()
+        if not any(k in ll for k in TP_KEYS):
+            continue
+
+        # 1) اول تلاش کن الگوی استاندارد «TPn : قیمت» را بگیری
+        m = re.search(r'\bTP\s*\d*\s*[:\-]\s*(-?\d+(?:\.\d+)?)', l, re.IGNORECASE)
+        if m:
+            tps.append(m.group(1))
+            continue
+
+        # 2) در غیر این صورت، اولین عددی را بگیر که تا 6 کاراکتر بعدش "pip/pips" نیامده
+        #    (تا «80 pips» به‌عنوان TP شمرده نشود) و عددهای خیلی کوچکِ شاخص (مثل "1" در "TP1") حذف شوند.
+        for nm in re.finditer(r'(-?\d+(?:\.\d+)?)(?![^\n]{0,6}\s*pips?\b)', l, re.IGNORECASE):
+            num = nm.group(1)
+
+            # اگر خط شامل TP بود، اعداد خیلی کوچک و بدون اعشار (شماره TP) را رد کن
+            if re.search(r'\bTP\b', l, re.IGNORECASE) and re.fullmatch(r'\d+', num):
+                # معمولاً شماره‌های TP کوچک‌اند؛ ردش کن
+                if int(num) <= 10:
+                    continue
+
+            tps.append(num)
+            break  # از هر خط فقط یک TP
+
+    # یکتا کردن با حفظ ترتیب
     seen = set()
     uniq: List[str] = []
     for x in tps:
@@ -136,6 +153,7 @@ def extract_tps(lines: List[str]) -> List[str]:
             uniq.append(x)
             seen.add(x)
     return uniq
+
 
 
 def extract_rr(text: str) -> Optional[str]:
