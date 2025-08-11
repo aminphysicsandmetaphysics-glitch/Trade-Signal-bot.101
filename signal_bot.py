@@ -29,22 +29,18 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger("signal-bot")
 
 # ----------------------------------------------------------------------------
-# Signal parsing (REPLACED / IMPROVED)
+# Signal parsing (improved)
 # ----------------------------------------------------------------------------
 
-# نمادها/سیمبل‌ها
 PAIR_RE = re.compile(
     r"(#?\b(?:XAUUSD|XAGUSD|GOLD|SILVER|USOIL|UKOIL|[A-Z]{3,5}[/ ]?[A-Z]{3,5}|[A-Z]{3,5}USD|USD[A-Z]{3,5})\b)"
 )
-# عدد
 NUM_RE = re.compile(r"(-?\d+(?:\.\d+)?)")
-# R/R
 RR_RE = re.compile(
     r"(\b(?:R\s*/\s*R|Risk[- ]?Reward|Risk\s*:\s*Reward)\b[^0-9]*?(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?))",
     re.IGNORECASE,
 )
 
-# حالت‌های پوزیشن
 POS_VARIANTS = [
     ("BUY LIMIT", "Buy Limit"),
     ("SELL LIMIT", "Sell Limit"),
@@ -54,7 +50,6 @@ POS_VARIANTS = [
     ("SELL", "Sell"),
 ]
 
-# کلیدواژه‌های نویز/آپدیت/تبلیغ که باید نادیده بگیریم
 NON_SIGNAL_HINTS = [
     "activated", "tp reached", "result so far", "screenshots", "cheers", "high-risk setup",
     "move sl", "put your sl", "risk free", "close", "closed", "delete", "running",
@@ -94,13 +89,11 @@ def guess_position(text: str) -> Optional[str]:
 
 
 def extract_entry(lines: List[str]) -> Optional[str]:
-    # حالت‌های صریح Entry
     for l in lines:
         if any(k in l.lower() for k in ENTRY_KEYS):
             m = NUM_RE.search(l)
             if m:
                 return m.group(1)
-    # حالت فشرده مثل: "BUY 3373.33" یا "SELL LIMIT 3338"
     for l in lines:
         if re.search(r"\b(BUY|SELL)(?:\s+(LIMIT|STOP))?\s+(-?\d+(?:\.\d+)?)\b", l, re.IGNORECASE):
             m = re.search(r"(-?\d+(?:\.\d+)?)", l)
@@ -118,17 +111,75 @@ def extract_sl(lines: List[str]) -> Optional[str]:
     return None
 
 
-def extract_tps(lines: List[str]) -> List[str]:
+def extract_tps(lines: List[str], entry_value: Optional[float] = None) -> List[str]:
+    """
+    از هر خط حاوی TP، فقط عددِ قیمت بعد از برچسب TP/Tp/Take Profit را می‌گیرد.
+    شماره شاخص TP (مثل 1/2/3) و «pips» نادیده گرفته می‌شوند.
+    """
     tps: List[str] = []
-    for l in lines:
-        if any(k in l.lower() for k in TP_KEYS):
-            # همه اعداد همان خط را بگیر (ممکن است چند TP در یک خط باشد)
-            nums = [n for n in re.findall(NUM_RE, l)]
-            if nums:
-                # معمولاً اولین‌ها TPها هستند؛ بقیه (مثل "80 pips") ممکن است همراه شوند
-                # با این حال، در اکثر سیگنال‌ها هر TP در یک خط جدا می‌آید
-                tps.extend(nums[:3])  # سقف منطقی
-    # حذف تکراری‌های احتمالی و حفظ ترتیب
+    patt = re.compile(
+        r"""(?ix)
+        \b(?:TP|T\s*P|Take\s*Profit)\s*\d*\s*[:=\-–]?\s*   # TP/Tp/Take Profit + شماره اختیاری + جداکننده
+        (-?\d+(?:\.\d+)?)                                   # عدد قیمت
+        """
+    )
+    pips_hint = re.compile(r"(?i)\bpips?\b")
+
+    for raw in lines:
+        l = raw.strip()
+        if not any(k in l.lower() for k in TP_KEYS):
+            continue
+
+        m = patt.search(l)
+        if m:
+            val = m.group(1)
+            # اگر بلافاصله بعد از عدد کلمه pips آمده باشد، نادیده بگیر
+            after = l[m.end():]
+            if pips_hint.search(after):
+                pass
+
+            # حذف شماره شاخص TP مثل 1..5 بدون اعشار
+            if "." not in val:
+                try:
+                    iv = int(val)
+                    if 1 <= iv <= 5:
+                        continue
+                except:
+                    pass
+
+            tps.append(val)
+            continue
+
+        # fallback: بین همه اعداد خط، قیمت معقول را انتخاب کن
+        nums = [n for n in re.findall(NUM_RE, l)]
+        if not nums:
+            continue
+
+        cleaned = []
+        for n in nums:
+            if "." not in n:
+                try:
+                    iv = int(n)
+                    if 1 <= iv <= 5:
+                        continue
+                except:
+                    pass
+            idx = l.find(n)
+            trail = l[idx + len(n): idx + len(n) + 10]
+            if pips_hint.search(trail):
+                continue
+            cleaned.append(n)
+
+        if entry_value is not None and cleaned:
+            try:
+                cleaned.sort(key=lambda x: abs(float(x) - float(entry_value)))
+            except:
+                pass
+
+        if cleaned:
+            tps.append(cleaned[0])
+
+    # حذف تکراری‌ها با حفظ ترتیب
     seen = set()
     uniq: List[str] = []
     for x in tps:
@@ -174,7 +225,6 @@ def to_unified(signal: Dict, chat_id: int, skip_rr_for: Iterable[int] = ()) -> s
 
 
 def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Optional[str]:
-    # حذف پیام‌های غیرسیگنال (آپدیت/تبلیغ/نتیجه)
     if looks_like_update(text):
         log.info("IGNORED (update/noise)")
         return None
@@ -188,7 +238,13 @@ def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Op
     position = guess_position(text) or ""
     entry = extract_entry(lines) or ""
     sl = extract_sl(lines) or ""
-    tps = extract_tps(lines)
+
+    try:
+        entry_val = float(entry) if entry else None
+    except Exception:
+        entry_val = None
+    tps = extract_tps(lines, entry_value=entry_val)
+
     rr = extract_rr(text)
 
     signal = {
@@ -199,12 +255,10 @@ def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Op
         "tps": tps,
         "rr": rr,
     }
-
     if not is_valid(signal):
         log.info(f"IGNORED (invalid) -> {signal}")
         return None
 
-    # sanity check: جهت TPها با Entry همخوان باشد
     try:
         e = float(entry)
         if position.upper().startswith("SELL"):
@@ -221,7 +275,7 @@ def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Op
     return to_unified(signal, chat_id, skip_rr_for)
 
 # ----------------------------------------------------------------------------
-# Channel identifier normalisation (kept from your version)
+# Channel identifier normalisation
 # ----------------------------------------------------------------------------
 
 def _norm_chat_identifier(x: Union[int, str]) -> Union[int, str]:
@@ -241,7 +295,7 @@ def _coerce_channel_id(x: Union[int, str]) -> Union[int, str]:
     return x
 
 # ----------------------------------------------------------------------------
-# SignalBot class (kept, with my stability fixes)
+# SignalBot class
 # ----------------------------------------------------------------------------
 
 class SignalBot:
@@ -278,15 +332,12 @@ class SignalBot:
         self._running = False
         self._callback: Optional[Callable[[dict], None]] = None
 
-    # Callback
     def set_on_signal(self, callback: Optional[Callable[[dict], None]]):
         self._callback = callback
 
-    # State
     def is_running(self) -> bool:
         return self._running
 
-    # Stop safely (thread-safe on client loop)
     def stop(self):
         if self.client:
             try:
@@ -299,13 +350,11 @@ class SignalBot:
                 log.error(f"Error during disconnect: {e}")
         self._running = False
 
-    # Start (with event loop fix)
     def start(self):
         if self._running:
             log.info("Bot already running.")
             return
 
-        # Create an event loop for this thread (Telethon needs current loop)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -314,24 +363,19 @@ class SignalBot:
 
         @self.client.on(events.NewMessage(chats=self.from_channels))
         async def handler(event):
-            """Receive, parse, and forward/copy."""
             try:
                 text = event.message.message or ""
                 snippet = text[:160].replace("\n", " ")
                 log.info(f"MSG from {event.chat_id}: {snippet} ...")
-
                 formatted = parse_signal(text, event.chat_id, skip_rr_for)
                 if not formatted:
                     return
-
-                # Try simple text send first
                 try:
                     await self.client.send_message(self.to_channel, formatted)
                     log.info(f"SENT to {self.to_channel}")
                 except (ChatWriteForbiddenError, ChatAdminRequiredError) as e:
                     log.error(f"Send failed (permissions): {e}")
                 except Exception as e:
-                    # Fallback: copy media (if any) with caption
                     log.warning(f"Send failed (will attempt copy): {e}")
                     try:
                         if event.message.media:
@@ -362,7 +406,6 @@ class SignalBot:
         log.info("Starting Telegram client...")
         self.client.start()
 
-        # Verify channels access & log titles/ids
         async def _verify():
             for c in self.from_channels:
                 try:
