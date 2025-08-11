@@ -1,5 +1,0 @@
-telethon==1.34.0
-Flask==3.0.3
-SQLAlchemy==2.0.32
-gunicorn==22.0.0
-Werkzeug==3.0.3
