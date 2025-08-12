@@ -252,10 +252,20 @@ def _norm_chat_identifier(x: Union[int, str]) -> Union[int, str]:
     return s
 
 
-def _coerce_channel_id(x: Union[int, str]) -> Union[int, str]:
-    """Coerce positive numeric IDs to Telegram channel form -100XXXXXXXXXX."""
+import re
+
+def _coerce_channel_id(x):
+    """Accept @username / t.me/.. / numeric str / int. Return int for numeric IDs."""
     if isinstance(x, int):
-        return x if x < 0 else int("-100" + str(x))
+        return x if x < 0 else int(f"-100{x}")
+    if isinstance(x, str):
+        s = x.strip()
+        s = re.sub(r"^https?://t\.me/", "", s, flags=re.IGNORECASE).lstrip("@")
+        if re.fullmatch(r"-?\d+", s):          # رشته‌ی عددی؟
+            n = int(s)
+            return n if n < 0 else int(f"-100{s}")
+        # اگر username بود همون رو برگردون
+        return s
     return x
 
 # ----------------------------------------------------------------------------
