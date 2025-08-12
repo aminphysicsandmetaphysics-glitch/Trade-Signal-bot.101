@@ -8,3 +8,13 @@ services:
     envVars:
       - key: PORT
         value: "5000"
+          - key: API_ID
+    value: "29278288"
+  - key: API_HASH
+    value: "8baff9421321d1ef6f14b0511209fbe2"
+  - key: SOURCES
+    value: "[1467736193, 2123816390, 1286609636]"
+  - key: DESTS
+    value: "[2703870775]"
+  - key: SESSION_NAME
+    value: "signal_bot"
