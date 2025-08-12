@@ -1,3 +1,5 @@
 telethon>=1.36.0
-fastapi>=0.112.0
-uvicorn>=0.30.0
+Flask>=2.3.3
+Flask-SQLAlchemy>=3.0.2
+SQLAlchemy>=2.0.30
+gunicorn>=21.2.0
