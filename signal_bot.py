@@ -34,7 +34,7 @@ import time
 from typing import Iterable, Optional, Union
 
 from telethon import TelegramClient, events
-from telethon.errors import FloodWaitError, RpcError
+from telethon.errors import FloodWaitError, RPCError as RpcError
 from telethon.sessions import StringSession
 
 # Configure a basic logger. This will print messages to stdout when run
