@@ -1,450 +1,228 @@
-"""Telethon wrapper for forwarding and parsing trading signals.
+"""Telegram forwarding bot for Render worker.
 
-This module encapsulates all Telegram interaction.  It normalises
-channel identifiers, listens to new messages from a list of source
-channels and forwards or copies them to a single destination channel.
+This script defines a resilient Telethon client that listens for new
+messages in a source channel and forwards them to one or more
+destination chats. It is designed to run as a long‑lived process in
+background worker environments such as Render. The code includes
+automatic restart logic, graceful handling of Telegram flood waits,
+and minimal logging for troubleshooting.
 
-When forwarding fails due to content protection, the bot will fall
-back to copying the text and any attached media.
+Environment variables:
+    API_ID (int): Telegram API ID from https://my.telegram.org.
+    API_HASH (str): Telegram API hash from https://my.telegram.org.
+    SESSION_STRING (str): StringSession for the account or bot.
+    SRC (str, optional): Identifier of the source chat/channel. May be
+        a numeric ID (e.g. ``-1001234567890``) or username (``@channel``).
+        If omitted, the bot listens to all incoming messages.
+    DST (str, optional): Comma‑separated list of destination chat
+        identifiers (IDs or usernames). Messages from SRC will be
+        forwarded to each destination in this list.
+
+Usage:
+    python signal_bot.py
+
+Ensure the environment variables are set appropriately. For security
+reasons, avoid committing your SESSION_STRING to version control.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
-from typing import List, Dict, Optional, Iterable, Callable, Union
+import os
+import time
+from typing import Iterable, Optional, Union
 
 from telethon import TelegramClient, events
-from telethon.errors import (
-    ChannelPrivateError,
-    ChatAdminRequiredError,
-    ChatWriteForbiddenError,
+from telethon.errors import FloodWaitError, RpcError
+from telethon.sessions import StringSession
+
+# Configure a basic logger. This will print messages to stdout when run
+# under Render's logging infrastructure. The format includes the
+# timestamp, log level, and the message for easy parsing.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
 )
 
-# ----------------------------------------------------------------------------
-# Logging
-# ----------------------------------------------------------------------------
-logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
-log = logging.getLogger("signal-bot")
 
-# ----------------------------------------------------------------------------
-# Signal parsing (REPLACED / IMPROVED)
-# ----------------------------------------------------------------------------
+def parse_chat_list(value: Optional[str]) -> list[Union[int, str]]:
+    """Parse a comma‑separated list of chat identifiers.
 
-# نمادها/سیمبل‌ها
-PAIR_RE = re.compile(
-    r"(#?\b(?:XAUUSD|XAGUSD|GOLD|SILVER|USOIL|UKOIL|[A-Z]{3,5}[/ ]?[A-Z]{3,5}|[A-Z]{3,5}USD|USD[A-Z]{3,5})\b)"
-)
-# عدد
-NUM_RE = re.compile(r"(-?\d+(?:\.\d+)?)")
-# R/R
-RR_RE = re.compile(
-    r"(\b(?:R\s*/\s*R|Risk[- ]?Reward|Risk\s*:\s*Reward)\b[^0-9]*?(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?))",
-    re.IGNORECASE,
-)
+    If the input is None or empty, returns an empty list. Numeric
+    strings are converted to integers (to support numeric chat IDs);
+    other values are left as strings.
 
-# حالت‌های پوزیشن
-POS_VARIANTS = [
-    ("BUY LIMIT", "Buy Limit"),
-    ("SELL LIMIT", "Sell Limit"),
-    ("BUY STOP", "Buy Stop"),
-    ("SELL STOP", "Sell Stop"),
-    ("BUY", "Buy"),
-    ("SELL", "Sell"),
-]
-
-# کلیدواژه‌های نویز/آپدیت/تبلیغ که باید نادیده بگیریم
-NON_SIGNAL_HINTS = [
-    "activated", "tp reached", "result so far", "screenshots", "cheers", "high-risk setup",
-    "move sl", "put your sl", "risk free", "close", "closed", "delete", "running",
-    "trade - update", "update", "guide", "watchlist", "broker", "subscription", "contact", "admin",
-    "tp almost", "tp hit", "tp reached", "sl reached", "sl hit", "profits", "week", "friday",
-]
-
-TP_KEYS = ["tp", "take profit", "take-profit", "t/p", "t p"]
-SL_KEYS = ["sl", "stop loss", "stop-loss", "s/l", "s l"]
-ENTRY_KEYS = ["entry price", "entry", "e:"]
-
-
-def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", s).strip()
-
-
-def guess_symbol(text: str) -> Optional[str]:
-    m = PAIR_RE.search((text or "").upper())
-    if not m:
-        return None
-    sym = m.group(1).upper().lstrip("#").replace(" ", "").replace("/", "")
-    if sym == "GOLD":
-        sym = "XAUUSD"
-    return sym
-
-
-def guess_position(text: str) -> Optional[str]:
-    up = (text or "").upper()
-    for raw, norm in POS_VARIANTS:
-        if raw in up:
-            return norm
-    if re.search(r"\bBUY\b", up):
-        return "Buy"
-    if re.search(r"\bSELL\b", up):
-        return "Sell"
-    return None
-
-
-def extract_entry(lines: List[str]) -> Optional[str]:
-    # حالت‌های صریح Entry
-    for l in lines:
-        if any(k in l.lower() for k in ENTRY_KEYS):
-            m = NUM_RE.search(l)
-            if m:
-                return m.group(1)
-    # حالت فشرده مثل: "BUY 3373.33" یا "SELL LIMIT 3338"
-    for l in lines:
-        if re.search(r"\b(BUY|SELL)(?:\s+(LIMIT|STOP))?\s+(-?\d+(?:\.\d+)?)\b", l, re.IGNORECASE):
-            m = re.search(r"(-?\d+(?:\.\d+)?)", l)
-            if m:
-                return m.group(1)
-    return None
-
-
-def extract_sl(lines: List[str]) -> Optional[str]:
-    for l in lines:
-        if any(k in l.lower() for k in SL_KEYS):
-            m = NUM_RE.search(l)
-            if m:
-                return m.group(1)
-    return None
-
-
-def extract_tps(lines: List[str]) -> List[str]:
-    tps: List[str] = []
-    for l in lines:
-        ll = l.lower()
-        if not any(k in ll for k in TP_KEYS):
+    :param value: Comma‑separated identifiers (may be None).
+    :returns: List of chat IDs as ints or usernames as strs.
+    """
+    if not value:
+        return []
+    result: list[Union[int, str]] = []
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
             continue
-
-        # 1) اول تلاش کن الگوی استاندارد «TPn : قیمت» را بگیری
-        m = re.search(r'\bTP\s*\d*\s*[:\-]\s*(-?\d+(?:\.\d+)?)', l, re.IGNORECASE)
-        if m:
-            tps.append(m.group(1))
-            continue
-
-        # 2) در غیر این صورت، اولین عددی را بگیر که تا 6 کاراکتر بعدش "pip/pips" نیامده
-        #    (تا «80 pips» به‌عنوان TP شمرده نشود) و عددهای خیلی کوچکِ شاخص (مثل "1" در "TP1") حذف شوند.
-        for nm in re.finditer(r'(-?\d+(?:\.\d+)?)(?![^\n]{0,6}\s*pips?\b)', l, re.IGNORECASE):
-            num = nm.group(1)
-
-            # اگر خط شامل TP بود، اعداد خیلی کوچک و بدون اعشار (شماره TP) را رد کن
-            if re.search(r'\bTP\b', l, re.IGNORECASE) and re.fullmatch(r'\d+', num):
-                # معمولاً شماره‌های TP کوچک‌اند؛ ردش کن
-                if int(num) <= 10:
-                    continue
-
-            tps.append(num)
-            break  # از هر خط فقط یک TP
-
-    # یکتا کردن با حفظ ترتیب
-    seen = set()
-    uniq: List[str] = []
-    for x in tps:
-        if x not in seen:
-            uniq.append(x)
-            seen.add(x)
-    return uniq
+        # Convert numeric identifiers to int; negative numbers are valid
+        if part.lstrip("-").isdigit():
+            try:
+                result.append(int(part))
+            except ValueError:
+                result.append(part)
+        else:
+            result.append(part)
+    return result
 
 
+def get_env_int(name: str) -> int:
+    """Retrieve an integer environment variable or raise.
 
-def extract_rr(text: str) -> Optional[str]:
-    m = RR_RE.search(text or "")
-    if m:
-        return f"{m.group(2)}/{m.group(3)}"
-    return None
+    Provides a helpful error message if the variable is missing or
+    cannot be converted to an integer.
 
-
-def looks_like_update(text: str) -> bool:
-    t = (text or "").lower()
-    return any(key in t for key in NON_SIGNAL_HINTS)
-
-
-def is_valid(signal: Dict) -> bool:
-    return all([
-        signal.get("symbol"),
-        signal.get("position"),
-        signal.get("entry"),
-        signal.get("sl"),
-    ]) and len(signal.get("tps", [])) >= 1
-
-
-def to_unified(signal: Dict, chat_id: int, skip_rr_for: Iterable[int] = ()) -> str:
-    parts: List[str] = []
-    parts.append(f"📊 #{signal['symbol']}")
-    parts.append(f"📉 Position: {signal['position']}")
-    rr = signal.get("rr")
-    if rr and chat_id not in set(skip_rr_for):
-        parts.append(f"❗️ R/R : {rr}")
-    parts.append(f"💲 Entry Price : {signal['entry']}")
-    for i, tp in enumerate(signal["tps"], 1):
-        parts.append(f"✔️ TP{i} : {tp}")
-    parts.append(f"🚫 Stop Loss : {signal['sl']}")
-    return "\n".join(parts)
-
-
-def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Optional[str]:
-    # حذف پیام‌های غیرسیگنال (آپدیت/تبلیغ/نتیجه)
-    if looks_like_update(text):
-        log.info("IGNORED (update/noise)")
-        return None
-
-    lines = [l.strip() for l in (text or "").splitlines() if l and l.strip()]
-    if not lines:
-        log.info("IGNORED (empty)")
-        return None
-
-    symbol = guess_symbol(text) or ""
-    position = guess_position(text) or ""
-    entry = extract_entry(lines) or ""
-    sl = extract_sl(lines) or ""
-    tps = extract_tps(lines)
-    rr = extract_rr(text)
-
-    signal = {
-        "symbol": symbol,
-        "position": position,
-        "entry": entry,
-        "sl": sl,
-        "tps": tps,
-        "rr": rr,
-    }
-
-    if not is_valid(signal):
-        log.info(f"IGNORED (invalid) -> {signal}")
-        return None
-
-    # sanity check: جهت TPها با Entry همخوان باشد
+    :param name: The name of the environment variable.
+    :returns: The integer value of the variable.
+    :raises KeyError: If the variable is not set.
+    :raises ValueError: If the value cannot be parsed as an integer.
+    """
+    raw = os.environ[name]
     try:
-        e = float(entry)
-        if position.upper().startswith("SELL"):
-            if all(float(tp) > e for tp in tps):
-                log.info("IGNORED (sell but all TP > entry)")
-                return None
-        if position.upper().startswith("BUY"):
-            if all(float(tp) < e for tp in tps):
-                log.info("IGNORED (buy but all TP < entry)")
-                return None
-    except Exception:
-        pass
-
-    return to_unified(signal, chat_id, skip_rr_for)
-
-# ----------------------------------------------------------------------------
-# Channel identifier normalisation (kept from your version)
-# ----------------------------------------------------------------------------
-
-def _norm_chat_identifier(x: Union[int, str]) -> Union[int, str]:
-    """Normalise channel identifiers: '@name' / 'https://t.me/name' / numeric."""
-    if isinstance(x, int):
-        return x
-    s = (x or "").strip()
-    s = re.sub(r"^https?://t\.me/", "", s, flags=re.IGNORECASE)
-    s = s.lstrip("@").strip()
-    return s
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"Environment variable {name} must be an integer") from exc
 
 
-import re
+def build_client() -> TelegramClient:
+    """Construct a Telethon client using a session string or file.
 
-def _coerce_channel_id(x):
-    """Accept @username / t.me/.. / numeric str / int. Return int for numeric IDs."""
-    if isinstance(x, int):
-        return x if x < 0 else int(f"-100{x}")
-    if isinstance(x, str):
-        s = x.strip()
-        s = re.sub(r"^https?://t\.me/", "", s, flags=re.IGNORECASE).lstrip("@")
-        if re.fullmatch(r"-?\d+", s):          # رشته‌ی عددی؟
-            n = int(s)
-            return n if n < 0 else int(f"-100{s}")
-        # اگر username بود همون رو برگردون
-        return s
-    return x
+    This helper reads ``API_ID`` and ``API_HASH`` from the environment,
+    and attempts to build a client from ``SESSION_STRING`` if it is
+    defined. Falling back to ``SESSION_NAME`` allows legacy `.session`
+    files to be used when a string session is not provided.
 
-# ----------------------------------------------------------------------------
-# SignalBot class (kept, with my stability fixes)
-# ----------------------------------------------------------------------------
-
-class SignalBot:
-    """A Telethon-based bot that forwards or copies signals from source channels."""
-
-    def __init__(
-        self,
-        api_id: int,
-        api_hash: str,
-        session_name: str,
-        from_channels: Iterable[Union[int, str]],
-        to_channel: Union[int, str],
-        skip_rr_chat_ids: Iterable[int] = (),
-    ):
-        self.api_id = api_id
-        self.api_hash = api_hash
-        self.session_name = session_name
-
-        # Normalise sources
-        norm_from: List[Union[int, str]] = []
-        for c in (from_channels or []):
-            c = _norm_chat_identifier(c)
-            c = _coerce_channel_id(c)
-            norm_from.append(c)
-        self.from_channels = norm_from
-
-        # Normalise destination
-        tc = _norm_chat_identifier(to_channel)
-        tc = _coerce_channel_id(tc)
-        self.to_channel = tc
-
-        self.skip_rr_chat_ids = set(skip_rr_chat_ids)
-        self.client: Optional[TelegramClient] = None
-        self._running = False
-        self._callback: Optional[Callable[[dict], None]] = None
-
-    # Callback
-    def set_on_signal(self, callback: Optional[Callable[[dict], None]]):
-        self._callback = callback
-
-    # State
-    def is_running(self) -> bool:
-        return self._running
-
-    # Stop safely (thread-safe on client loop)
-    def stop(self):
-        if self.client:
-            try:
-                fut = asyncio.run_coroutine_threadsafe(
-                    self.client.disconnect(), self.client.loop
-                )
-                fut.result(timeout=10)
-                log.info("Client disconnected.")
-            except Exception as e:
-                log.error(f"Error during disconnect: {e}")
-        self._running = False
-
-    # Start (with event loop fix)
-    def start(self):
-        if self._running:
-            log.info("Bot already running.")
-            return
-
-        # Create an event loop for this thread (Telethon needs current loop)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        self.client = TelegramClient(self.session_name, self.api_id, self.api_hash)
-        skip_rr_for = self.skip_rr_chat_ids
-
-        @self.client.on(events.NewMessage(chats=self.from_channels))
-        async def handler(event):
-            """Receive, parse, and forward/copy."""
-            try:
-                text = event.message.message or ""
-                snippet = text[:160].replace("\n", " ")
-                log.info(f"MSG from {event.chat_id}: {snippet} ...")
-
-                formatted = parse_signal(text, event.chat_id, skip_rr_for)
-                if not formatted:
-                    return
-
-                # Try simple text send first
-                try:
-                    await self.client.send_message(self.to_channel, formatted)
-                    log.info(f"SENT to {self.to_channel}")
-                except (ChatWriteForbiddenError, ChatAdminRequiredError) as e:
-                    log.error(f"Send failed (permissions): {e}")
-                except Exception as e:
-                    # Fallback: copy media (if any) with caption
-                    log.warning(f"Send failed (will attempt copy): {e}")
-                    try:
-                        if event.message.media:
-                            await self.client.send_file(
-                                self.to_channel,
-                                event.message.media,
-                                caption=formatted,
-                                force_document=False,
-                                allow_cache=False,
-                            )
-                        else:
-                            await self.client.send_message(self.to_channel, formatted)
-                        log.info(f"COPIED to {self.to_channel}")
-                    except Exception as copy_err:
-                        log.error(f"Copy failed: {copy_err}")
-
-                if self._callback:
-                    try:
-                        self._callback(
-                            {"source_chat_id": str(event.chat_id), "text": formatted}
-                        )
-                    except Exception:
-                        pass
-            except Exception as e:
-                log.error(f"Handler error: {e}")
-
-        self._running = True
-        log.info("Starting Telegram client...")
-        self.client.start()
-
-        # Verify channels access & log titles/ids
-        async def _verify():
-            for c in self.from_channels:
-                try:
-                    ent = await self.client.get_entity(c)
-                    title = getattr(ent, "title", str(ent))
-                    cid = getattr(ent, "id", c)
-                    log.info(f"Listening source: {title} (id={cid})")
-                except ChannelPrivateError:
-                    log.error(
-                        f"Cannot access source '{c}': ChannelPrivateError (not a participant or channel is private)."
-                    )
-                except Exception as e:
-                    log.error(f"Cannot access source '{c}': {e}")
-            try:
-                ent = await self.client.get_entity(self.to_channel)
-                title = getattr(ent, "title", str(ent))
-                cid = getattr(ent, "id", self.to_channel)
-                log.info(f"Destination: {title} (id={cid})")
-            except Exception as e:
-                log.error(f"Cannot access destination '{self.to_channel}': {e}")
-
-        self.client.loop.run_until_complete(_verify())
-
-        log.info("Client started. Waiting for messages...")
-        self.client.run_until_disconnected()
-        log.info("Client disconnected (run_until_disconnected returned).")
-        self._running = False
-
-
-# ------------------------------------------------------------------------------
-# Standalone run (optional)
-# ------------------------------------------------------------------------------
-if __name__ == "__main__":
-    import os, json
-    api_id = int(os.environ.get("API_ID", "29278288"))
-    api_hash = os.environ.get("API_HASH", "8baff9421321d1ef6f14b0511209fbe2")
-    session_name = os.environ.get("SESSION_NAME", "signal_bot")
-    sources_env = os.environ.get("SOURCES", "[-1001467736193]")
-    dest_env = os.environ.get("DEST", "sjkalalsk")
-
-    try:
-        from_channels = json.loads(sources_env)
-    except Exception:
-        from_channels = []
-
-    to_channel = dest_env
-    skip_rr_for: set[int] = {1286609636}  # کانال سوم بدون R/R
-
-    bot = SignalBot(
+    :returns: A configured ``TelegramClient`` instance ready to connect.
+    """
+    api_id = get_env_int("API_ID")
+    api_hash = os.environ["API_HASH"]
+    sess_str = os.environ.get("SESSION_STRING")
+    if sess_str:
+        # Use the provided string session for authentication. This avoids
+        # relying on a physical .session file and allows secrets to be
+        # stored in environment variables.
+        session: Union[StringSession, str] = StringSession(sess_str)
+    else:
+        # Fall back to a named session file. Telethon will look for
+        # ``<session_name>.session`` relative to the working directory.
+        session_name = os.environ.get("SESSION_NAME", "signal_bot")
+        session = session_name
+    return TelegramClient(
+        session,
         api_id,
         api_hash,
-        session_name,
-        from_channels,
-        to_channel,
-        skip_rr_for,
+        # Override device properties for better stability with Telegram
+        system_version="Windows 10",
+        device_model="Render Worker",
+        app_version="1.0",
+        lang_code="en",
     )
-    bot.start()
+
+
+async def forward_message(
+    client: TelegramClient, event: events.NewMessage.Event, dests: Iterable[Union[int, str]]
+) -> None:
+    """Forward an incoming message to multiple destinations.
+
+    Handles FloodWaitError by waiting and retrying. Retries up to three
+    times on transient errors and skips the destination on persistent
+    errors.
+
+    :param client: The Telethon client.
+    :param event: The incoming message event.
+    :param dests: Iterable of destinations to forward to.
+    """
+    for dest in dests:
+        attempt = 0
+        while True:
+            try:
+                await client.forward_messages(dest, event.message)
+                break
+            except FloodWaitError as e:
+                delay = int(getattr(e, "seconds", 0)) + 1
+                logging.warning(
+                    f"Flood wait for {delay}s when forwarding to {dest}; sleeping..."
+                )
+                await asyncio.sleep(delay)
+            except RpcError as e:
+                # Permanent error such as lack of permissions or invalid chat
+                logging.error(f"RPC error forwarding to {dest}: {e!r}; skipping")
+                break
+            except Exception as e:
+                attempt += 1
+                if attempt > 3:
+                    logging.exception(
+                        f"Unrecoverable error forwarding to {dest}: {e!r}; giving up"
+                    )
+                    break
+                logging.warning(
+                    f"Error forwarding to {dest}: {e!r}; retrying ({attempt}/3)"
+                )
+                await asyncio.sleep(2 * attempt)
+
+
+async def run_once() -> None:
+    """Run the Telegram bot once until disconnected.
+
+    This function starts the client, logs into Telegram and sets up the
+    message handler. If the connection drops, this coroutine returns
+    control to the caller (for external restart logic).
+    """
+    client = build_client()
+    src_raw = os.environ.get("SRC", "").strip() or None
+    src_chat: Optional[Union[int, str]]
+    if src_raw:
+        # Parse single source ID or username
+        src_chat = parse_chat_list(src_raw)[0]
+    else:
+        src_chat = None
+    dests = parse_chat_list(os.environ.get("DST"))
+    await client.start()
+    me = await client.get_me()
+    logging.info(f"Connected to Telegram as {me.username or me.id}")
+    # Define handler inside to capture current dests and src_chat
+    @client.on(events.NewMessage(chats=src_chat))
+    async def handler(event: events.NewMessage.Event) -> None:
+        try:
+            logging.info(f"Received message {event.id} from {event.chat_id}")
+            if dests:
+                await forward_message(client, event, dests)
+            else:
+                logging.warning("No destinations configured; skipping forward")
+        except Exception:
+            logging.exception("Unhandled error in message handler")
+    # Send startup message to self if possible
+    try:
+        await client.send_message("me", "✅ Bot started on Render.")
+    except Exception:
+        # It's fine if we can't send to ourselves (e.g. bot accounts)
+        pass
+    # Wait indefinitely until disconnected
+    await client.run_until_disconnected()
+
+
+def main() -> None:
+    """Main entry point with automatic restart.
+
+    This function wraps ``run_once`` in a loop to automatically
+    reconnect if the client crashes due to network issues or schema
+    changes. A small delay is inserted between restarts.
+    """
+    while True:
+        try:
+            asyncio.run(run_once())
+        except Exception:
+            logging.exception("Bot crashed; restarting in 5 seconds")
+            time.sleep(5)
+
+
+if __name__ == "__main__":
+    main()
