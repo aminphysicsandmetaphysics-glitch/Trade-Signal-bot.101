@@ -1,7 +1,6 @@
-
 """Telethon wrapper for forwarding and parsing trading signals.
 
-This module encapsulates all Telegram interaction.  It normalises
+This module encapsulates all Telegram interaction. It normalises
 channel identifiers, listens to new messages from a list of source
 channels and forwards or copies them to a single destination channel.
 
@@ -22,6 +21,7 @@ from telethon.errors import (
     ChatAdminRequiredError,
     ChatWriteForbiddenError,
 )
+from telethon.sessions import StringSession  # 👈 NEW
 
 # ----------------------------------------------------------------------------
 # Logging
@@ -126,27 +126,19 @@ def extract_tps(lines: List[str]) -> List[str]:
         if not any(k in ll for k in TP_KEYS):
             continue
 
-        # 1) اول تلاش کن الگوی استاندارد «TPn : قیمت» را بگیری
         m = re.search(r'\bTP\s*\d*\s*[:\-]\s*(-?\d+(?:\.\d+)?)', l, re.IGNORECASE)
         if m:
             tps.append(m.group(1))
             continue
 
-        # 2) در غیر این صورت، اولین عددی را بگیر که تا 6 کاراکتر بعدش "pip/pips" نیامده
-        #    (تا «80 pips» به‌عنوان TP شمرده نشود) و عددهای خیلی کوچکِ شاخص (مثل "1" در "TP1") حذف شوند.
         for nm in re.finditer(r'(-?\d+(?:\.\d+)?)(?![^\n]{0,6}\s*pips?\b)', l, re.IGNORECASE):
             num = nm.group(1)
-
-            # اگر خط شامل TP بود، اعداد خیلی کوچک و بدون اعشار (شماره TP) را رد کن
             if re.search(r'\bTP\b', l, re.IGNORECASE) and re.fullmatch(r'\d+', num):
-                # معمولاً شماره‌های TP کوچک‌اند؛ ردش کن
                 if int(num) <= 10:
                     continue
-
             tps.append(num)
-            break  # از هر خط فقط یک TP
+            break
 
-    # یکتا کردن با حفظ ترتیب
     seen = set()
     uniq: List[str] = []
     for x in tps:
@@ -154,7 +146,6 @@ def extract_tps(lines: List[str]) -> List[str]:
             uniq.append(x)
             seen.add(x)
     return uniq
-
 
 
 def extract_rr(text: str) -> Optional[str]:
@@ -193,7 +184,6 @@ def to_unified(signal: Dict, chat_id: int, skip_rr_for: Iterable[int] = ()) -> s
 
 
 def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Optional[str]:
-    # حذف پیام‌های غیرسیگنال (آپدیت/تبلیغ/نتیجه)
     if looks_like_update(text):
         log.info("IGNORED (update/noise)")
         return None
@@ -223,7 +213,6 @@ def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Op
         log.info(f"IGNORED (invalid) -> {signal}")
         return None
 
-    # sanity check: جهت TPها با Entry همخوان باشد
     try:
         e = float(entry)
         if position.upper().startswith("SELL"):
@@ -240,11 +229,10 @@ def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Op
     return to_unified(signal, chat_id, skip_rr_for)
 
 # ----------------------------------------------------------------------------
-# Channel identifier normalisation (kept from your version)
+# Channel identifier normalisation
 # ----------------------------------------------------------------------------
 
 def _norm_chat_identifier(x: Union[int, str]) -> Union[int, str]:
-    """Normalise channel identifiers: '@name' / 'https://t.me/name' / numeric."""
     if isinstance(x, int):
         return x
     s = (x or "").strip()
@@ -253,8 +241,6 @@ def _norm_chat_identifier(x: Union[int, str]) -> Union[int, str]:
     return s
 
 
-import re
-
 def _coerce_channel_id(x):
     """Accept @username / t.me/.. / numeric str / int. Return int for numeric IDs."""
     if isinstance(x, int):
@@ -262,15 +248,14 @@ def _coerce_channel_id(x):
     if isinstance(x, str):
         s = x.strip()
         s = re.sub(r"^https?://t\.me/", "", s, flags=re.IGNORECASE).lstrip("@")
-        if re.fullmatch(r"-?\d+", s):          # رشته‌ی عددی؟
+        if re.fullmatch(r"-?\d+", s):
             n = int(s)
             return n if n < 0 else int(f"-100{s}")
-        # اگر username بود همون رو برگردون
         return s
     return x
 
 # ----------------------------------------------------------------------------
-# SignalBot class (kept, with my stability fixes)
+# SignalBot
 # ----------------------------------------------------------------------------
 
 class SignalBot:
@@ -280,16 +265,17 @@ class SignalBot:
         self,
         api_id: int,
         api_hash: str,
-        session_name: str,
+        session_name_or_string: str,
         from_channels: Iterable[Union[int, str]],
         to_channel: Union[int, str],
         skip_rr_chat_ids: Iterable[int] = (),
+        use_string_session: bool = False,  # 👈 NEW
     ):
         self.api_id = api_id
         self.api_hash = api_hash
-        self.session_name = session_name
+        self.session_name_or_string = session_name_or_string
+        self.use_string_session = use_string_session
 
-        # Normalise sources
         norm_from: List[Union[int, str]] = []
         for c in (from_channels or []):
             c = _norm_chat_identifier(c)
@@ -297,7 +283,6 @@ class SignalBot:
             norm_from.append(c)
         self.from_channels = norm_from
 
-        # Normalise destination
         tc = _norm_chat_identifier(to_channel)
         tc = _coerce_channel_id(tc)
         self.to_channel = tc
@@ -307,15 +292,12 @@ class SignalBot:
         self._running = False
         self._callback: Optional[Callable[[dict], None]] = None
 
-    # Callback
     def set_on_signal(self, callback: Optional[Callable[[dict], None]]):
         self._callback = callback
 
-    # State
     def is_running(self) -> bool:
         return self._running
 
-    # Stop safely (thread-safe on client loop)
     def stop(self):
         if self.client:
             try:
@@ -328,22 +310,26 @@ class SignalBot:
                 log.error(f"Error during disconnect: {e}")
         self._running = False
 
-    # Start (with event loop fix)
     def start(self):
         if self._running:
             log.info("Bot already running.")
             return
 
-        # Create an event loop for this thread (Telethon needs current loop)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        self.client = TelegramClient(self.session_name, self.api_id, self.api_hash)
+        # 👇 ایجاد کلاینت با Session String (در صورت فعال بودن) یا نام فایل
+        if self.use_string_session:
+            session = StringSession(self.session_name_or_string)
+        else:
+            session = self.session_name_or_string
+
+        self.client = TelegramClient(session, self.api_id, self.api_hash,
+                                     device_model="RenderBot", system_version="4.16.30-vx")
         skip_rr_for = self.skip_rr_chat_ids
 
         @self.client.on(events.NewMessage(chats=self.from_channels))
         async def handler(event):
-            """Receive, parse, and forward/copy."""
             try:
                 text = event.message.message or ""
                 snippet = text[:160].replace("\n", " ")
@@ -353,14 +339,12 @@ class SignalBot:
                 if not formatted:
                     return
 
-                # Try simple text send first
                 try:
                     await self.client.send_message(self.to_channel, formatted)
                     log.info(f"SENT to {self.to_channel}")
                 except (ChatWriteForbiddenError, ChatAdminRequiredError) as e:
                     log.error(f"Send failed (permissions): {e}")
                 except Exception as e:
-                    # Fallback: copy media (if any) with caption
                     log.warning(f"Send failed (will attempt copy): {e}")
                     try:
                         if event.message.media:
@@ -391,7 +375,6 @@ class SignalBot:
         log.info("Starting Telegram client...")
         self.client.start()
 
-        # Verify channels access & log titles/ids
         async def _verify():
             for c in self.from_channels:
                 try:
@@ -422,30 +405,58 @@ class SignalBot:
 
 
 # ------------------------------------------------------------------------------
-# Standalone run (optional)
+# Standalone run
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
     import os, json
+
     api_id = int(os.environ.get("API_ID", "29278288"))
     api_hash = os.environ.get("API_HASH", "8baff9421321d1ef6f14b0511209fbe2")
-    session_name = os.environ.get("SESSION_NAME", "signal_bot")
-    sources_env = os.environ.get("SOURCES", "[-1001467736193]")
-    dest_env = os.environ.get("DEST", "sjkalalsk")
 
+    # ✅ اولویت با SESSION_STRING (امن)
+    session_string = os.environ.get("SESSION_STRING", "").strip()
+    if session_string:
+        session_value = session_string
+        use_string_session = True
+    else:
+        session_value = os.environ.get("SESSION_NAME", "signal_bot")
+        use_string_session = False
+
+    # ✅ منابع
+    sources_env = os.environ.get("SOURCES", "[]")
     try:
         from_channels = json.loads(sources_env)
     except Exception:
         from_channels = []
 
-    to_channel = dest_env
+    # ✅ مقصد: DESTS (لیست) یا DEST (تکی)
+    dests_env = os.environ.get("DESTS")
+    dest_env = os.environ.get("DEST")
+    to_channel_raw: Union[int, str, None] = None
+
+    if dests_env:
+        try:
+            dest_list = json.loads(dests_env)
+            to_channel_raw = dest_list[0] if dest_list else None
+        except Exception:
+            pass
+    if to_channel_raw is None and dest_env:
+        to_channel_raw = dest_env
+
+    if to_channel_raw is None:
+        raise RuntimeError("No destination provided. Set DESTS (list) or DEST (single).")
+
+    to_channel = _coerce_channel_id(_norm_chat_identifier(to_channel_raw))
+
     skip_rr_for: set[int] = {1286609636}  # کانال سوم بدون R/R
 
     bot = SignalBot(
         api_id,
         api_hash,
-        session_name,
+        session_value,
         from_channels,
         to_channel,
         skip_rr_for,
+        use_string_session=use_string_session,  # 👈 NEW
     )
     bot.start()
