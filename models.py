@@ -28,7 +28,7 @@ class Config(db.Model):
 
     Only a single row is expected in this table.  It contains API
     credentials, the name of the Telethon session file, the JSON
-    representation of source channels, and the destination channel.
+    representation of source channels, and the destination channels.
     """
 
     __tablename__ = "config"
@@ -37,7 +37,7 @@ class Config(db.Model):
     api_hash: Mapped[str | None] = mapped_column(String(128))
     session_name: Mapped[str] = mapped_column(String(64), default="signal_bot")
     from_channels: Mapped[str | None] = mapped_column(Text)  # JSON array of sources
-    to_channel: Mapped[str | None] = mapped_column(String(128))
+    to_channels: Mapped[str | None] = mapped_column(Text)  # JSON array of destinations
 
 
 class Signal(db.Model):
