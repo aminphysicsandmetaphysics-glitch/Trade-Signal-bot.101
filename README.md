@@ -4,10 +4,11 @@ This repository contains a Telegram signal‑forwarding bot designed to run 24/7
 
 ## Features
 
-* Forward messages from one or more **source channels** to a single **destination channel**.
+* Forward messages from one or more **source channels** to multiple **destination channels**.
 * Intelligent signal parsing with support for multiple formats. Noise messages (updates, screenshots, etc.) are ignored.
 * Compact, unified output format that omits the original source.
 * Web dashboard for configuring API credentials, source/destination channels and for starting/stopping the bot.
+* Automatic reconnection to Telegram if the client disconnects.
 * Single‑process, single‑thread deployment to avoid `sqlite3.OperationalError: database is locked` errors.
 
 ## Repository Layout
@@ -39,7 +40,7 @@ README.md            # This file
    python app.py
    ```
 
-4. Open http://127.0.0.1:5000 in your browser and fill in your API ID, API hash, session name, source channels and destination channel.  Click **Start Bot** to begin forwarding.
+4. Open http://127.0.0.1:5000 in your browser and fill in your API ID, API hash, session name, source channels and destination channels.  Click **Start Bot** to begin forwarding.
 
 ## Deploying to Render
 
@@ -55,7 +56,7 @@ README.md            # This file
    * `API_ID` – your Telegram API ID.
    * `API_HASH` – your Telegram API hash.
    * `SOURCES` – a JSON array of source channel usernames or numeric IDs (e.g. `["@sourceA", -1001234567890]`).
-   * `DESTS` – a JSON array of destination channel usernames or numeric IDs.  Only the first entry is currently used.
+   * `DESTS` – a JSON array of destination channel usernames or numeric IDs.
    * `SESSION_NAME` (optional) – the base name of your Telethon session file (default: `signal_bot`).  The file must be mounted in the working directory as `<SESSION_NAME>.session`.
 
 5. Upload your `<SESSION_NAME>.session` file to the root of the repository or mount it via a persistent volume.
