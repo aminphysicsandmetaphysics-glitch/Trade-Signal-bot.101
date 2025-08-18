@@ -1,22 +1,16 @@
 """Flask dashboard for configuring and controlling the Telegram signal bot.
 
-This application persists API credentials and channel settings in a
-SQLite database via SQLAlchemy.  A simple web interface allows you to
-update the configuration and start/stop the Telethon bot at runtime.
-
-On startup, if the database contains no configuration row and
-environment variables `API_ID` and `API_HASH` are set, a default
-configuration will be created from `SOURCES`, `DESTS` and
-`SESSION_NAME`.  This makes zero‑click deployment on Render possible.
+This application stores API credentials and channel settings in memory,
+optionally initialised from environment variables.  A simple web
+interface allows you to update the configuration and start/stop the
+Telethon bot at runtime.
 """
 
 from __future__ import annotations
 
 import json
-import logging
 import os
 import re
-from datetime import datetime
 from threading import Thread
 
 from flask import (
@@ -30,7 +24,6 @@ from flask import (
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from models import db, Config, Signal
 from signal_bot import SignalBot
 
 
@@ -44,21 +37,16 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 
 # ----------------------------------------------------------------------------
-# Database configuration
+# In-memory configuration
 # ----------------------------------------------------------------------------
 
-db_uri = os.environ.get("DATABASE_URL", "sqlite:///signal_bot.db")
-app.config["SQLALCHEMY_DATABASE_URI"] = db_uri
-
-# Use pool_pre_ping to recycle dead connections and check_same_thread=False
-# so that the Flask app and Telethon can share the same SQLite file.
-app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-    "pool_pre_ping": True,
-    "pool_recycle": 300,
-    "connect_args": {"check_same_thread": False},
+config_store = {
+    "api_id": os.environ.get("API_ID", ""),
+    "api_hash": os.environ.get("API_HASH", ""),
+    "session_name": os.environ.get("SESSION_NAME", "signal_bot"),
+    "from_channels": os.environ.get("SOURCES", ""),
+    "to_channels": os.environ.get("DESTS", ""),
 }
-
-db.init_app(app)
 
 
 # ----------------------------------------------------------------------------
@@ -95,67 +83,13 @@ def parse_to_channels(raw: str | None) -> list:
     return _parse_channels(raw)
 
 
-def ensure_default_config():
-    """Create a default configuration row if none exists and environment vars are set."""
-    with app.app_context():
-        cfg = Config.query.first()
-        if cfg:
-            return
-        # Pull from environment
-        api_id = os.environ.get("API_ID")
-        api_hash = os.environ.get("API_HASH")
-        sources_env = os.environ.get("SOURCES")
-        dests_env = os.environ.get("DESTS")
-        session_name = os.environ.get("SESSION_NAME", "signal_bot")
-        if api_id and api_hash and dests_env:
-            try:
-                sources = json.loads(sources_env) if sources_env else []
-                dests = json.loads(dests_env)
-            except Exception:
-                sources = []
-                dests = []
-            cfg = Config(
-                api_id=api_id,
-                api_hash=api_hash,
-                session_name=session_name,
-                from_channels=json.dumps(sources),
-                to_channels=json.dumps(dests),
-            )
-            db.session.add(cfg)
-            db.session.commit()
-
-
-# Create tables and ensure default config on startup
-with app.app_context():
-    db.create_all()
-    ensure_default_config()
-
-
-def on_signal_saved(payload: dict) -> None:
-    """Optional callback to persist a minimal record of forwarded signals."""
-    try:
-        s = Signal(
-            symbol="",
-            position="",
-            entry="",
-            sl="",
-            rr=None,
-            tps=json.dumps([]),
-            source_chat_id=payload.get("source_chat_id"),
-        )
-        db.session.add(s)
-        db.session.commit()
-    except Exception as e:
-        app.logger.error(f"Save signal error: {e}")
-
-
 # ----------------------------------------------------------------------------
 # Routes
 # ----------------------------------------------------------------------------
 
 @app.route("/", methods=["GET"])
 def index():
-    cfg = Config.query.first()
+    cfg = config_store
     return render_template("index.html", cfg=cfg)
 
 
@@ -167,17 +101,15 @@ def save_config():
     from_channels = request.form.get("from_channels", "").strip()
     to_channels = request.form.get("to_channels", "").strip()
 
-    cfg = Config.query.first()
-    if not cfg:
-        cfg = Config()
-        db.session.add(cfg)
-
-    cfg.api_id = api_id
-    cfg.api_hash = api_hash
-    cfg.session_name = session_name
-    cfg.from_channels = from_channels
-    cfg.to_channels = to_channels
-    db.session.commit()
+    config_store.update(
+        {
+            "api_id": api_id,
+            "api_hash": api_hash,
+            "session_name": session_name,
+            "from_channels": from_channels,
+            "to_channels": to_channels,
+        }
+    )
     flash("Saved configuration.", "success")
     return redirect(url_for("index"))
 
@@ -185,8 +117,8 @@ def save_config():
 @app.route("/start_bot", methods=["POST"])
 def start_bot():
     global bot_instance
-    cfg = Config.query.first()
-    if not cfg or not cfg.api_id or not cfg.api_hash or not cfg.to_channels:
+    cfg = config_store
+    if not cfg.get("api_id") or not cfg.get("api_hash") or not cfg.get("to_channels"):
         flash("Please fill API ID, API HASH and destination channels.", "error")
         return redirect(url_for("index"))
     if bot_instance and bot_instance.is_running():
@@ -194,21 +126,19 @@ def start_bot():
         return redirect(url_for("index"))
 
     # Parse sources and destinations
-    from_channels = parse_from_channels(cfg.from_channels)
-    to_channels = parse_to_channels(cfg.to_channels)
+    from_channels = parse_from_channels(cfg.get("from_channels"))
+    to_channels = parse_to_channels(cfg.get("to_channels"))
     # Channels that should not display R/R values
     skip_rr: set[int] = set()
 
     bot_instance = SignalBot(
-        api_id=int(cfg.api_id),
-        api_hash=cfg.api_hash,
-        session_name=cfg.session_name or "signal_bot",
+        api_id=int(cfg.get("api_id")),
+        api_hash=cfg.get("api_hash"),
+        session_name=cfg.get("session_name") or "signal_bot",
         from_channels=from_channels,
         to_channels=to_channels,
         skip_rr_chat_ids=skip_rr,
     )
-    # Optionally persist a minimal history
-    bot_instance.set_on_signal(on_signal_saved)
     t = Thread(target=bot_instance.start, daemon=True)
     t.start()
     flash("Bot started.", "success")
