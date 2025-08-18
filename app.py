@@ -72,25 +72,27 @@ bot_instance: SignalBot | None = None
 # Helper functions
 # ----------------------------------------------------------------------------
 
-def parse_from_channels(raw: str | None) -> list:
-    """Deserialize a JSON array of source channel identifiers.
-
-    Accepts either a JSON-encoded list or a comma/space separated string.
-    Returns an empty list on error.
-    """
+def _parse_channels(raw: str | None) -> list:
+    """Deserialize a JSON array or comma/space separated list of channels."""
     if not raw:
         return []
     raw = raw.strip()
-    # Try JSON first
     try:
         data = json.loads(raw)
         if isinstance(data, list):
             return data
     except Exception:
         pass
-    # Fallback: split by commas
     parts = [p.strip() for p in re.split(r"[,\s]+", raw) if p.strip()]
     return parts
+
+
+def parse_from_channels(raw: str | None) -> list:
+    return _parse_channels(raw)
+
+
+def parse_to_channels(raw: str | None) -> list:
+    return _parse_channels(raw)
 
 
 def ensure_default_config():
@@ -109,16 +111,15 @@ def ensure_default_config():
             try:
                 sources = json.loads(sources_env) if sources_env else []
                 dests = json.loads(dests_env)
-                to_channel = dests[0] if dests else None
             except Exception:
                 sources = []
-                to_channel = None
+                dests = []
             cfg = Config(
                 api_id=api_id,
                 api_hash=api_hash,
                 session_name=session_name,
                 from_channels=json.dumps(sources),
-                to_channel=to_channel,
+                to_channels=json.dumps(dests),
             )
             db.session.add(cfg)
             db.session.commit()
@@ -164,7 +165,7 @@ def save_config():
     api_hash = request.form.get("api_hash", "").strip()
     session_name = request.form.get("session_name", "signal_bot").strip()
     from_channels = request.form.get("from_channels", "").strip()
-    to_channel = request.form.get("to_channel", "").strip()
+    to_channels = request.form.get("to_channels", "").strip()
 
     cfg = Config.query.first()
     if not cfg:
@@ -175,7 +176,7 @@ def save_config():
     cfg.api_hash = api_hash
     cfg.session_name = session_name
     cfg.from_channels = from_channels
-    cfg.to_channel = to_channel
+    cfg.to_channels = to_channels
     db.session.commit()
     flash("Saved configuration.", "success")
     return redirect(url_for("index"))
@@ -185,15 +186,16 @@ def save_config():
 def start_bot():
     global bot_instance
     cfg = Config.query.first()
-    if not cfg or not cfg.api_id or not cfg.api_hash or not cfg.to_channel:
-        flash("Please fill API ID, API HASH and destination channel.", "error")
+    if not cfg or not cfg.api_id or not cfg.api_hash or not cfg.to_channels:
+        flash("Please fill API ID, API HASH and destination channels.", "error")
         return redirect(url_for("index"))
     if bot_instance and bot_instance.is_running():
         flash("Bot is already running.", "warning")
         return redirect(url_for("index"))
 
-    # Parse sources
+    # Parse sources and destinations
     from_channels = parse_from_channels(cfg.from_channels)
+    to_channels = parse_to_channels(cfg.to_channels)
     # Channels that should not display R/R values
     skip_rr: set[int] = set()
 
@@ -202,7 +204,7 @@ def start_bot():
         api_hash=cfg.api_hash,
         session_name=cfg.session_name or "signal_bot",
         from_channels=from_channels,
-        to_channel=cfg.to_channel,
+        to_channels=to_channels,
         skip_rr_chat_ids=skip_rr,
     )
     # Optionally persist a minimal history
@@ -228,7 +230,6 @@ def stop_bot():
 def status():
     running = bool(bot_instance and bot_instance.is_running())
     return jsonify({"running": running})
-
 
 @app.route("/health")
 def health():
