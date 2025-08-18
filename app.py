@@ -1,34 +1,44 @@
 # app.py
 # -*- coding: utf-8 -*-
+"""
+Flask dashboard for configuring and controlling a Telegram signal bot.
+
+این نسخه با کلاس جدید SignalBot که مقادیر را از متغیرهای محیطی می‌خواند سازگار است.
+قابلیت ذخیره و بازیابی تنظیمات از پایگاه داده، راه‌اندازی و توقف ربات، و مشاهدهٔ وضعیت اجرا را فراهم می‌کند.
+"""
 
 from __future__ import annotations
-import json, logging, os
+
+import json
+import os
 from datetime import datetime
 from threading import Thread
 
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
+
 from models import db, Config, Signal
 from signal_bot import SignalBot
 
+# ---------- Flask & SQLAlchemy setup ----------
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret")
-app.wsgi_app = ProxyFix(app.wsgi_app)  # type: ignore
+app.wsgi_app = ProxyFix(app.wsgi_app)  # نوع ترافیک Reverse‑Proxy را اصلاح می‌کند
 
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///signals.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 with app.app_context():
+    db.init_app(app)
     db.create_all()
 
-# a single, process-wide handle for the running bot
+# متغیر سراسری برای نگهداری نمونهٔ درحال اجرای ربات
 bot_instance: SignalBot | None = None
 
 
-# ----------------------- helpers -----------------------
-
+# ---------- Helpers ----------
 def _as_list(value: str | None) -> list[str]:
-    """Accept JSON list or comma-separated string; return trimmed list[str]."""
+    """یک رشته را (JSON list یا کاما جد) به لیست تبدیل می‌کند."""
     if not value:
         return []
     value = value.strip()
@@ -40,27 +50,30 @@ def _as_list(value: str | None) -> list[str]:
             return [str(x).strip() for x in data if str(x).strip()]
     except Exception:
         pass
-    return [p.strip() for p in value.split(",") if p.strip()]
+    return [part.strip() for part in value.split(",") if part.strip()]
 
 def ensure_default_config() -> None:
-    """Seed DB config from ENV if empty (keeps raw text for channels)."""
+    """
+    اگر جدول Config خالی باشد، مقدارهای اولیه را از متغیرهای محیطی می‌خواند
+    و همان رشته‌ها را ذخیره می‌کند.
+    """
     with app.app_context():
         row = Config.query.first()
         if row:
             return
 
-        api_id = os.environ.get("API_ID")
-        api_hash = os.environ.get("API_HASH")
-        session_name = os.environ.get("SESSION_NAME", "signal_bot")
+        api_id_env = os.environ.get("API_ID")
+        api_hash_env = os.environ.get("API_HASH")
+        session_name_env = os.environ.get("SESSION_NAME", "signal_bot")
         sources_env = os.environ.get("SOURCES", "")
         dests_env = os.environ.get("DESTS", "")
 
         row = Config(
-            api_id=int(api_id) if (api_id and api_id.isdigit()) else None,
-            api_hash=api_hash or "",
-            session_name=session_name,
+            api_id=int(api_id_env) if (api_id_env and api_id_env.isdigit()) else None,
+            api_hash=api_hash_env or "",
+            session_name=session_name_env,
             from_channels=sources_env.strip(),
-            to_channel=dests_env.strip(),  # keep full multi-dest string
+            to_channel=dests_env.strip(),
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
@@ -68,9 +81,9 @@ def ensure_default_config() -> None:
         db.session.commit()
 
 def save_config_from_form() -> None:
-    """Persist posted form fields to Config (keep raw strings)."""
+    """مقادیر ارسال‌شده از فرم را ذخیره می‌کند."""
     api_id_raw = (request.form.get("api_id") or "").strip()
-    api_id = int(api_id_raw) if api_id_raw.isdigit() else None
+    api_id: int | None = int(api_id_raw) if api_id_raw.isdigit() else None
     api_hash = (request.form.get("api_hash") or "").strip()
     session_name = (request.form.get("session_name") or "signal_bot").strip()
     from_channels = (request.form.get("from_channels") or "").strip()
@@ -91,7 +104,7 @@ def save_config_from_form() -> None:
         db.session.commit()
 
 def on_signal_saved(signal_dict: dict) -> None:
-    """Optional: keep a tiny history of forwarded signals."""
+    """اختیاری: ذخیرهٔ تاریخچهٔ پیام‌های فوروارد شده در جدول Signal."""
     try:
         with app.app_context():
             s = Signal(
@@ -106,9 +119,7 @@ def on_signal_saved(signal_dict: dict) -> None:
     except Exception as e:
         app.logger.exception("Failed to save signal: %s", e)
 
-
-# ----------------------- routes -----------------------
-
+# ---------- Routes ----------
 @app.route("/", methods=["GET"])
 def index():
     ensure_default_config()
@@ -126,29 +137,32 @@ def start_bot():
     global bot_instance
 
     cfg = Config.query.first()
+    # در صورت نبود مقادیر ضروری:
     if not cfg or not cfg.api_id or not cfg.api_hash or not cfg.to_channel:
         flash("Please fill API ID, API HASH and destination channel.", "error")
         return redirect(url_for("index"))
-
+    # اگر ربات اجراست:
     if bot_instance:
         flash("Bot is already running.", "warning")
         return redirect(url_for("index"))
 
+    # کانال‌ها را به لیست تبدیل کن
     sources_list = _as_list(cfg.from_channels)
-    dests_list   = _as_list(cfg.to_channel)
+    dests_list = _as_list(cfg.to_channel)
 
-    # SignalBot reads from ENV
+    # متغیرهای محیطی مورد نیاز ربات
     os.environ["API_ID"] = str(cfg.api_id)
     os.environ["API_HASH"] = cfg.api_hash
     os.environ["SESSION_NAME"] = cfg.session_name or "signal_bot"
     os.environ["SOURCES"] = json.dumps(sources_list, ensure_ascii=False)
-    os.environ["DESTS"]   = json.dumps(dests_list,   ensure_ascii=False)
+    os.environ["DESTS"] = json.dumps(dests_list, ensure_ascii=False)
 
     bot_instance = SignalBot()
-    bot_instance.set_on_signal(on_signal_saved)
+    if hasattr(bot_instance, "set_on_signal"):
+        bot_instance.set_on_signal(on_signal_saved)
 
     def run_bot():
-        global bot_instance   # <-- fix: use global, not nonlocal
+        global bot_instance
         try:
             bot_instance.client.loop.run_until_complete(bot_instance.start())
         except Exception as e:
