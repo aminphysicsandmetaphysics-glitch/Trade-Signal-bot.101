@@ -15,13 +15,6 @@ import logging
 import re
 from typing import List, Dict, Optional, Iterable, Callable, Union
 
-# ADD: imports for freshness/dedupe
-import hashlib  # ADD
-import time     # ADD
-from datetime import datetime, timezone, timedelta  # ADD
-from collections import deque  # ADD
-from typing import Deque, Tuple  # ADD
-
 from telethon import TelegramClient, events
 from telethon.errors import (
     ChannelPrivateError,
@@ -246,33 +239,6 @@ def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Op
     return to_unified(signal, chat_id, skip_rr_for)
 
 # ----------------------------------------------------------------------------
-# Dedupe helper (ADD) — اثرانگشت محتوا
-# ----------------------------------------------------------------------------
-def _content_fingerprint(ev_msg) -> str:
-    """
-    اثرانگشت محتوا: متن نرمال‌شده + شناسه‌ی مدیا (photo/document).
-    برای جلوگیری از ارسال تکراری پیام‌های مشابه در یک بازه زمانی.
-    """
-    parts = []
-    text = (getattr(ev_msg, "message", None) or "").strip()
-    text = re.sub(r"\s+", " ", text).lower()
-    parts.append(text)
-
-    media = getattr(ev_msg, "media", None)
-    media_id = ""
-    if media:
-        try:
-            if getattr(ev_msg, "photo", None) and getattr(ev_msg.photo, "id", None):
-                media_id = f"photo:{ev_msg.photo.id}"
-            elif getattr(ev_msg, "document", None) and getattr(ev_msg.document, "id", None):
-                media_id = f"doc:{ev_msg.document.id}"
-        except Exception:
-            pass
-    parts.append(media_id)
-
-    return hashlib.sha256("||".join(parts).encode("utf-8")).hexdigest()
-
-# ----------------------------------------------------------------------------
 # Channel identifier normalisation (kept from your version)
 # ----------------------------------------------------------------------------
 
@@ -293,7 +259,7 @@ def _coerce_channel_id(x: Union[int, str]) -> Union[int, str]:
     return x
 
 # ----------------------------------------------------------------------------
-# SignalBot class (kept, with stability fixes: freshness + dedupe)
+# SignalBot class (kept, with my stability fixes)
 # ----------------------------------------------------------------------------
 
 class SignalBot:
@@ -337,14 +303,6 @@ class SignalBot:
         self.retry_delay = retry_delay
         self.max_retries = max_retries
 
-        # ADD: freshness/dedupe state
-        self.startup_time = datetime.now(timezone.utc)
-        self.grace = timedelta(minutes=int(os.environ.get("STARTUP_GRACE_MIN", "2")))  # safe window
-        self.id_seen: set[Tuple[int, int]] = set()         # (source_chat_id, message_id)
-        self.fp_window: Deque[Tuple[float, str]] = deque() # (timestamp, fingerprint)
-        self.fp_set: set[str] = set()
-        self.fp_ttl_sec = int(os.environ.get("DEDUP_TTL_SECONDS", "3600"))  # 60 min default
-
     # Callback
     def set_on_signal(self, callback: Optional[Callable[[dict], None]]):
         self._callback = callback
@@ -366,40 +324,6 @@ class SignalBot:
                 log.error(f"Error during disconnect: {e}")
         self._running = False
 
-    # ADD: freshness check
-    def _fresh_enough(self, ev_dt) -> bool:
-        """Process only messages newer than startup (with a small grace window)."""
-        if ev_dt is None:
-            return True
-        if getattr(ev_dt, "tzinfo", None) is None:
-            ev_dt = ev_dt.replace(tzinfo=timezone.utc)
-        return ev_dt >= (self.startup_time - self.grace)
-
-    # ADD: dedupe logic
-    def _dedup_and_remember(self, src_id: int, msg) -> bool:
-        """
-        True => already seen (skip).
-        Dedupe by (src_id, message_id) and by content fingerprint within TTL window.
-        """
-        mid = getattr(msg, "id", None)
-        if mid is not None:
-            key = (int(src_id), int(mid))
-            if key in self.id_seen:
-                return True
-            self.id_seen.add(key)
-
-        now = time.time()
-        while self.fp_window and (now - self.fp_window[0][0] > self.fp_ttl_sec):
-            _, old_fp = self.fp_window.popleft()
-            self.fp_set.discard(old_fp)
-
-        fp = _content_fingerprint(msg)
-        if fp in self.fp_set:
-            return True
-        self.fp_set.add(fp)
-        self.fp_window.append((now, fp))
-        return False
-
     # Start (with auto-reconnect loop)
     def start(self):
         if self._running:
@@ -415,22 +339,13 @@ class SignalBot:
             self.client = TelegramClient(self.session_name, self.api_id, self.api_hash)
             skip_rr_for = self.skip_rr_chat_ids
 
-            # CHG: limit to incoming messages, and apply freshness/dedupe
-            @self.client.on(events.NewMessage(chats=self.from_channels, incoming=True))  # CHG
+            @self.client.on(events.NewMessage(chats=self.from_channels))
             async def handler(event):
                 """Receive, parse, and forward/copy."""
                 try:
                     text = event.message.message or ""
                     snippet = text[:160].replace("\n", " ")
                     log.info(f"MSG from {event.chat_id}: {snippet} ...")
-
-                    # ADD: skip old/backlog messages near startup
-                    if not self._fresh_enough(getattr(event.message, "date", self.startup_time)):
-                        return
-
-                    # ADD: dedupe (by message_id and content fingerprint)
-                    if self._dedup_and_remember(int(event.chat_id), event.message):
-                        return
 
                     formatted = parse_signal(text, event.chat_id, skip_rr_for)
                     if not formatted:
@@ -517,8 +432,8 @@ class SignalBot:
                 break
 
             log.info(f"Reconnecting in {self.retry_delay} seconds...")
-            import time as _t
-            _t.sleep(self.retry_delay)
+            import time
+            time.sleep(self.retry_delay)
 
         self._running = False
 
