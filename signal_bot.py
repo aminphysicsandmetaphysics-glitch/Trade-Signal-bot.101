@@ -271,8 +271,10 @@ class SignalBot:
         api_hash: str,
         session_name: str,
         from_channels: Iterable[Union[int, str]],
-        to_channel: Union[int, str],
+        to_channels: Iterable[Union[int, str]],
         skip_rr_chat_ids: Iterable[int] = (),
+        retry_delay: int = 5,
+        max_retries: int | None = None,
     ):
         self.api_id = api_id
         self.api_hash = api_hash
@@ -286,15 +288,20 @@ class SignalBot:
             norm_from.append(c)
         self.from_channels = norm_from
 
-        # Normalise destination
-        tc = _norm_chat_identifier(to_channel)
-        tc = _coerce_channel_id(tc)
-        self.to_channel = tc
+        # Normalise destinations
+        norm_to: List[Union[int, str]] = []
+        for c in (to_channels or []):
+            c = _norm_chat_identifier(c)
+            c = _coerce_channel_id(c)
+            norm_to.append(c)
+        self.to_channels = norm_to
 
         self.skip_rr_chat_ids = set(skip_rr_chat_ids)
         self.client: Optional[TelegramClient] = None
         self._running = False
         self._callback: Optional[Callable[[dict], None]] = None
+        self.retry_delay = retry_delay
+        self.max_retries = max_retries
 
     # Callback
     def set_on_signal(self, callback: Optional[Callable[[dict], None]]):
@@ -317,96 +324,117 @@ class SignalBot:
                 log.error(f"Error during disconnect: {e}")
         self._running = False
 
-    # Start (with event loop fix)
+    # Start (with auto-reconnect loop)
     def start(self):
         if self._running:
             log.info("Bot already running.")
             return
 
-        # Create an event loop for this thread (Telethon needs current loop)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        self._running = True
+        attempts = 0
 
-        self.client = TelegramClient(self.session_name, self.api_id, self.api_hash)
-        skip_rr_for = self.skip_rr_chat_ids
+        while self._running:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self.client = TelegramClient(self.session_name, self.api_id, self.api_hash)
+            skip_rr_for = self.skip_rr_chat_ids
 
-        @self.client.on(events.NewMessage(chats=self.from_channels))
-        async def handler(event):
-            """Receive, parse, and forward/copy."""
-            try:
-                text = event.message.message or ""
-                snippet = text[:160].replace("\n", " ")
-                log.info(f"MSG from {event.chat_id}: {snippet} ...")
-
-                formatted = parse_signal(text, event.chat_id, skip_rr_for)
-                if not formatted:
-                    return
-
-                # Try simple text send first
+            @self.client.on(events.NewMessage(chats=self.from_channels))
+            async def handler(event):
+                """Receive, parse, and forward/copy."""
                 try:
-                    await self.client.send_message(self.to_channel, formatted)
-                    log.info(f"SENT to {self.to_channel}")
-                except (ChatWriteForbiddenError, ChatAdminRequiredError) as e:
-                    log.error(f"Send failed (permissions): {e}")
-                except Exception as e:
-                    # Fallback: copy media (if any) with caption
-                    log.warning(f"Send failed (will attempt copy): {e}")
-                    try:
-                        if event.message.media:
-                            await self.client.send_file(
-                                self.to_channel,
-                                event.message.media,
-                                caption=formatted,
-                                force_document=False,
-                                allow_cache=False,
-                            )
-                        else:
-                            await self.client.send_message(self.to_channel, formatted)
-                        log.info(f"COPIED to {self.to_channel}")
-                    except Exception as copy_err:
-                        log.error(f"Copy failed: {copy_err}")
+                    text = event.message.message or ""
+                    snippet = text[:160].replace("\n", " ")
+                    log.info(f"MSG from {event.chat_id}: {snippet} ...")
 
-                if self._callback:
+                    formatted = parse_signal(text, event.chat_id, skip_rr_for)
+                    if not formatted:
+                        return
+
+                    for dest in self.to_channels:
+                        try:
+                            await self.client.send_message(dest, formatted)
+                            log.info(f"SENT to {dest}")
+                        except (ChatWriteForbiddenError, ChatAdminRequiredError) as e:
+                            log.error(f"Send failed to {dest} (permissions): {e}")
+                        except Exception as e:
+                            log.warning(f"Send failed to {dest} (will attempt copy): {e}")
+                            try:
+                                if event.message.media:
+                                    await self.client.send_file(
+                                        dest,
+                                        event.message.media,
+                                        caption=formatted,
+                                        force_document=False,
+                                        allow_cache=False,
+                                    )
+                                else:
+                                    await self.client.send_message(dest, formatted)
+                                log.info(f"COPIED to {dest}")
+                            except Exception as copy_err:
+                                log.error(f"Copy failed to {dest}: {copy_err}")
+
+                    if self._callback:
+                        try:
+                            self._callback({"source_chat_id": str(event.chat_id), "text": formatted})
+                        except Exception:
+                            pass
+                except Exception as e:
+                    log.error(f"Handler error: {e}")
+
+            log.info("Starting Telegram client...")
+            try:
+                self.client.start()
+
+                async def _verify():
+                    for c in self.from_channels:
+                        try:
+                            ent = await self.client.get_entity(c)
+                            title = getattr(ent, "title", str(ent))
+                            cid = getattr(ent, "id", c)
+                            log.info(f"Listening source: {title} (id={cid})")
+                        except ChannelPrivateError:
+                            log.error(
+                                f"Cannot access source '{c}': ChannelPrivateError (not a participant or channel is private)."
+                            )
+                        except Exception as e:
+                            log.error(f"Cannot access source '{c}': {e}")
+                    for dest in self.to_channels:
+                        try:
+                            ent = await self.client.get_entity(dest)
+                            title = getattr(ent, "title", str(ent))
+                            cid = getattr(ent, "id", dest)
+                            log.info(f"Destination: {title} (id={cid})")
+                        except Exception as e:
+                            log.error(f"Cannot access destination '{dest}': {e}")
+
+                self.client.loop.run_until_complete(_verify())
+
+                log.info("Client started. Waiting for messages...")
+                self.client.run_until_disconnected()
+                log.info("Client disconnected (run_until_disconnected returned).")
+            except Exception as e:
+                log.error(f"Client error: {e}")
+            finally:
+                if self.client:
                     try:
-                        self._callback(
-                            {"source_chat_id": str(event.chat_id), "text": formatted}
-                        )
+                        self.client.disconnect()
                     except Exception:
                         pass
-            except Exception as e:
-                log.error(f"Handler error: {e}")
 
-        self._running = True
-        log.info("Starting Telegram client...")
-        self.client.start()
+            if not self._running:
+                break
 
-        # Verify channels access & log titles/ids
-        async def _verify():
-            for c in self.from_channels:
-                try:
-                    ent = await self.client.get_entity(c)
-                    title = getattr(ent, "title", str(ent))
-                    cid = getattr(ent, "id", c)
-                    log.info(f"Listening source: {title} (id={cid})")
-                except ChannelPrivateError:
-                    log.error(
-                        f"Cannot access source '{c}': ChannelPrivateError (not a participant or channel is private)."
-                    )
-                except Exception as e:
-                    log.error(f"Cannot access source '{c}': {e}")
-            try:
-                ent = await self.client.get_entity(self.to_channel)
-                title = getattr(ent, "title", str(ent))
-                cid = getattr(ent, "id", self.to_channel)
-                log.info(f"Destination: {title} (id={cid})")
-            except Exception as e:
-                log.error(f"Cannot access destination '{self.to_channel}': {e}")
+            attempts += 1
+            if self.max_retries and attempts >= self.max_retries:
+                log.error("Max retries reached. Stopping bot.")
+                self._running = False
+                break
 
-        self.client.loop.run_until_complete(_verify())
+            log.info(f"Reconnecting in {self.retry_delay} seconds...")
+            import time
+            time.sleep(self.retry_delay)
 
-        log.info("Client started. Waiting for messages...")
-        self.client.run_until_disconnected()
-        log.info("Client disconnected (run_until_disconnected returned).")
         self._running = False
 
 
@@ -419,14 +447,17 @@ if __name__ == "__main__":
     api_hash = os.environ.get("API_HASH", "8baff9421321d1ef6f14b0511209fbe2")
     session_name = os.environ.get("SESSION_NAME", "signal_bot")
     sources_env = os.environ.get("SOURCES", "[-1001467736193]")
-    dest_env = os.environ.get("DEST", "sjkalalsk")
+    dest_env = os.environ.get("DESTS", "[\"sjkalalsk\"]")
 
     try:
         from_channels = json.loads(sources_env)
     except Exception:
         from_channels = []
+    try:
+        to_channels = json.loads(dest_env)
+    except Exception:
+        to_channels = []
 
-    to_channel = dest_env
     skip_rr_for: set[int] = {1286609636}  # کانال سوم بدون R/R
 
     bot = SignalBot(
@@ -434,7 +465,7 @@ if __name__ == "__main__":
         api_hash,
         session_name,
         from_channels,
-        to_channel,
+        to_channels,
         skip_rr_for,
     )
     bot.start()
