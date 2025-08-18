@@ -9,13 +9,11 @@ This repository contains a Telegram signal‑forwarding bot designed to run 24/7
 * Compact, unified output format that omits the original source.
 * Web dashboard for configuring API credentials, source/destination channels and for starting/stopping the bot.
 * Automatic reconnection to Telegram if the client disconnects.
-* Single‑process, single‑thread deployment to avoid `sqlite3.OperationalError: database is locked` errors.
 
 ## Repository Layout
 
 ```
 app.py               # Flask application with dashboard and bot lifecycle controls
-models.py            # SQLAlchemy models for configuration and optional signal storage
 signal_bot.py        # Telethon wrapper with intelligent signal parsing
 gunicorn.conf.py     # Gunicorn configuration (single worker/thread)
 wsgi.py              # Entrypoint for Gunicorn
@@ -65,6 +63,5 @@ README.md            # This file
 
 ## Notes
 
-* The Gunicorn configuration sets **workers=1** and **threads=1** to ensure that both the Flask app and Telethon share a single SQLite connection.  This prevents `database is locked` errors.
 * Channel identifiers prefixed with `@` are resolved automatically.  Numeric channel IDs (e.g. 1467736193) are coerced to the proper negative format (`-1001467736193`) for Telegram API compatibility.
 * If a source channel has forwarding restrictions enabled, the bot will attempt to copy the content instead of forwarding.  This fallback works for both text messages and media messages.
