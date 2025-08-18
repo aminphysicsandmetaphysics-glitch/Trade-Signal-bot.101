@@ -20,8 +20,8 @@
         <small>فایل <code>{{ (cfg.session_name if cfg else 'signal_bot') or 'signal_bot' }}.session</code> باید کنار کد باشد.</small>
       </div>
       <div class="col-6">
-        <label>کانال مقصد (ID یا username)</label>
-        <input name="to_channel" value="{{ (cfg.to_channel if cfg else '') or '' }}" placeholder="مثلاً sjkalalsk" required>
+        <label>کانال‌های مقصد (JSON یا لیست با کاما)</label>
+        <textarea name="to_channels" placeholder='["dest1", "dest2"]'>{{ (cfg.to_channels if cfg else '') or '' }}</textarea>
       </div>
     </div>
     <label>کانال‌های منبع (JSON یا لیست با کاما)</label>
