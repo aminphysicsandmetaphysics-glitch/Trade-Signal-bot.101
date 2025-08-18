@@ -1,13 +1,21 @@
-"""Flask dashboard for configuring and controlling the Telegram signal bot.
+# app.py
+# -*- coding: utf-8 -*-
 
-This application persists API credentials and channel settings in a
-SQLite database via SQLAlchemy.  A simple web interface allows you to
-update the configuration and start/stop the Telethon bot at runtime.
+"""
+Flask dashboard for configuring and controlling the Telegram signal bot.
 
-On startup, if the database contains no configuration row and
-environment variables `API_ID` and `API_HASH` are set, a default
-configuration will be created from `SOURCES`, `DESTS` and
-`SESSION_NAME`.  This makes zero‑click deployment on Render possible.
+- Persists config to SQLite via SQLAlchemy (see models.py).
+- Works with the new SignalBot that reads config from environment variables.
+- Supports multiple destination channels (comma-separated or JSON list).
+- Removes usage of deprecated methods/params (e.g., is_running(), ctor args).
+
+Routes:
+- GET  /            -> dashboard
+- POST /save        -> save config
+- POST /start_bot   -> start Telethon bot (threaded)
+- POST /stop_bot    -> stop/disconnect bot
+- GET  /status      -> {"running": bool}
+- GET  /health      -> "OK"
 """
 
 from __future__ import annotations
@@ -28,155 +36,145 @@ from flask import (
     request,
     url_for,
 )
+
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from models import db, Config, Signal
 from signal_bot import SignalBot
 
 
-# ----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Flask app initialisation
-# ----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret")
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+app.wsgi_app = ProxyFix(app.wsgi_app)  # type: ignore
 
+# DB config (works on Render + local)
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
+    "DATABASE_URL", "sqlite:///signals.db"
+)
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# ----------------------------------------------------------------------------
-# Database configuration
-# ----------------------------------------------------------------------------
+with app.app_context():
+    db.create_all()
 
-db_uri = os.environ.get("DATABASE_URL", "sqlite:///signal_bot.db")
-app.config["SQLALCHEMY_DATABASE_URI"] = db_uri
-
-# Use pool_pre_ping to recycle dead connections and check_same_thread=False
-# so that the Flask app and Telethon can share the same SQLite file.
-app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-    "pool_pre_ping": True,
-    "pool_recycle": 300,
-    "connect_args": {"check_same_thread": False},
-}
-
-db.init_app(app)
-
-
-# ----------------------------------------------------------------------------
-# Global bot instance
-# ----------------------------------------------------------------------------
-
+# Global bot handle (thread-safe enough for this simple dashboard)
 bot_instance: SignalBot | None = None
 
 
-# ----------------------------------------------------------------------------
-# Helper functions
-# ----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------------------
 
-def parse_from_channels(raw: str | None) -> list:
-    """Deserialize a JSON array of source channel identifiers.
-
-    Accepts either a JSON-encoded list or a comma/space separated string.
-    Returns an empty list on error.
-    """
-    if not raw:
+def _as_list(value: str | None) -> list[str]:
+    """Accept JSON list or comma-separated string; return trimmed list[str]."""
+    if not value:
         return []
-    raw = raw.strip()
-    # Try JSON first
+    value = value.strip()
+    if not value:
+        return []
+    # JSON first
     try:
-        data = json.loads(raw)
+        data = json.loads(value)
         if isinstance(data, list):
-            return data
+            return [str(x).strip() for x in data if str(x).strip()]
     except Exception:
         pass
-    # Fallback: split by commas
-    parts = [p.strip() for p in re.split(r"[,\s]+", raw) if p.strip()]
-    return parts
+    # Fallback: comma separated
+    return [part.strip() for part in value.split(",") if part.strip()]
 
 
-def ensure_default_config():
-    """Create a default configuration row if none exists and environment vars are set."""
+def ensure_default_config() -> None:
+    """
+    If DB lacks a row, seed from env:
+    API_ID, API_HASH, SESSION_NAME, SOURCES, DESTS
+    """
     with app.app_context():
-        cfg = Config.query.first()
-        if cfg:
+        row = Config.query.first()
+        if row:
             return
-        # Pull from environment
+
         api_id = os.environ.get("API_ID")
         api_hash = os.environ.get("API_HASH")
-        sources_env = os.environ.get("SOURCES")
-        dests_env = os.environ.get("DESTS")
         session_name = os.environ.get("SESSION_NAME", "signal_bot")
-        if api_id and api_hash and dests_env:
-            try:
-                sources = json.loads(sources_env) if sources_env else []
-                dests = json.loads(dests_env)
-                to_channel = dests[0] if dests else None
-            except Exception:
-                sources = []
-                to_channel = None
-            cfg = Config(
-                api_id=api_id,
-                api_hash=api_hash,
-                session_name=session_name,
-                from_channels=json.dumps(sources),
-                to_channel=to_channel,
-            )
-            db.session.add(cfg)
-            db.session.commit()
+        sources_env = os.environ.get("SOURCES", "")
+        dests_env = os.environ.get("DESTS", "")
 
+        # We store raw strings in DB so the UI can keep user's input format.
+        from_channels = sources_env.strip()
+        to_channel = dests_env.strip()
 
-# Create tables and ensure default config on startup
-with app.app_context():
-    db.create_all()
-    ensure_default_config()
-
-
-def on_signal_saved(payload: dict) -> None:
-    """Optional callback to persist a minimal record of forwarded signals."""
-    try:
-        s = Signal(
-            symbol="",
-            position="",
-            entry="",
-            sl="",
-            rr=None,
-            tps=json.dumps([]),
-            source_chat_id=payload.get("source_chat_id"),
+        row = Config(
+            api_id=int(api_id) if api_id and api_id.isdigit() else None,
+            api_hash=api_hash or "",
+            session_name=session_name,
+            from_channels=from_channels,
+            to_channel=to_channel,  # <-- keep full multi-dest, not just first item
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
         )
-        db.session.add(s)
+        db.session.add(row)
         db.session.commit()
+
+
+def save_config_from_form() -> None:
+    """Save config from request.form (keeps raw strings for channels fields)."""
+    api_id_raw = (request.form.get("api_id") or "").strip()
+    api_id = int(api_id_raw) if api_id_raw.isdigit() else None
+    api_hash = (request.form.get("api_hash") or "").strip()
+    session_name = (request.form.get("session_name") or "signal_bot").strip()
+    from_channels = (request.form.get("from_channels") or "").strip()
+    to_channel = (request.form.get("to_channel") or "").strip()
+
+    with app.app_context():
+        cfg = Config.query.first()
+        if not cfg:
+            cfg = Config(created_at=datetime.utcnow())
+            db.session.add(cfg)
+
+        cfg.api_id = api_id
+        cfg.api_hash = api_hash
+        cfg.session_name = session_name
+        cfg.from_channels = from_channels
+        cfg.to_channel = to_channel
+        cfg.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+
+# Optional: persist incoming signals to DB when bot sees them
+def on_signal_saved(signal_dict: dict) -> None:
+    try:
+        with app.app_context():
+            s = Signal(
+                message_id=str(signal_dict.get("message_id", "")),
+                from_chat=str(signal_dict.get("from_chat", "")),
+                to_chats=json.dumps(signal_dict.get("to_chats", []), ensure_ascii=False),
+                text=signal_dict.get("text", ""),
+                created_at=datetime.utcnow(),
+            )
+            db.session.add(s)
+            db.session.commit()
     except Exception as e:
-        app.logger.error(f"Save signal error: {e}")
+        app.logger.exception("Failed to save signal: %s", e)
 
 
-# ----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Routes
-# ----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 @app.route("/", methods=["GET"])
 def index():
+    ensure_default_config()
     cfg = Config.query.first()
     return render_template("index.html", cfg=cfg)
 
 
-@app.route("/save_config", methods=["POST"])
-def save_config():
-    api_id = request.form.get("api_id", "").strip()
-    api_hash = request.form.get("api_hash", "").strip()
-    session_name = request.form.get("session_name", "signal_bot").strip()
-    from_channels = request.form.get("from_channels", "").strip()
-    to_channel = request.form.get("to_channel", "").strip()
-
-    cfg = Config.query.first()
-    if not cfg:
-        cfg = Config()
-        db.session.add(cfg)
-
-    cfg.api_id = api_id
-    cfg.api_hash = api_hash
-    cfg.session_name = session_name
-    cfg.from_channels = from_channels
-    cfg.to_channel = to_channel
-    db.session.commit()
+@app.route("/save", methods=["POST"])
+def on_save():
+    save_config_from_form()
     flash("Saved configuration.", "success")
     return redirect(url_for("index"))
 
@@ -184,31 +182,47 @@ def save_config():
 @app.route("/start_bot", methods=["POST"])
 def start_bot():
     global bot_instance
+
     cfg = Config.query.first()
     if not cfg or not cfg.api_id or not cfg.api_hash or not cfg.to_channel:
         flash("Please fill API ID, API HASH and destination channel.", "error")
         return redirect(url_for("index"))
-    if bot_instance and bot_instance.is_running():
+
+    # Already running?
+    if bot_instance:
         flash("Bot is already running.", "warning")
         return redirect(url_for("index"))
 
-    # Parse sources
-    from_channels = parse_from_channels(cfg.from_channels)
-    # Channels that should not display R/R values
-    skip_rr: set[int] = set()
+    # Parse sources/dests from DB (support JSON or comma)
+    sources_list = _as_list(cfg.from_channels)
+    dests_list = _as_list(cfg.to_channel)
 
-    bot_instance = SignalBot(
-        api_id=int(cfg.api_id),
-        api_hash=cfg.api_hash,
-        session_name=cfg.session_name or "signal_bot",
-        from_channels=from_channels,
-        to_channel=cfg.to_channel,
-        skip_rr_chat_ids=skip_rr,
-    )
-    # Optionally persist a minimal history
+    # Set environment for SignalBot (it reads from env)
+    os.environ["API_ID"] = str(cfg.api_id)
+    os.environ["API_HASH"] = cfg.api_hash
+    os.environ["SESSION_NAME"] = cfg.session_name or "signal_bot"
+    os.environ["SOURCES"] = json.dumps(sources_list, ensure_ascii=False)
+    os.environ["DESTS"] = json.dumps(dests_list, ensure_ascii=False)
+
+    # Create instance (no ctor args in new class)
+    bot_instance = SignalBot()
     bot_instance.set_on_signal(on_signal_saved)
-    t = Thread(target=bot_instance.start, daemon=True)
+
+    # Run the bot in a background thread, driving its asyncio loop
+    def run_bot():
+        try:
+            # SignalBot.start() is async; use its internal loop
+            bot_instance.client.loop.run_until_complete(bot_instance.start())
+        except Exception as e:
+            app.logger.exception("Bot crashed: %s", e)
+        finally:
+            # ensure we reflect stopped state if it exits
+            nonlocal bot_instance
+            bot_instance = None
+
+    t = Thread(target=run_bot, daemon=True)
     t.start()
+
     flash("Bot started.", "success")
     return redirect(url_for("index"))
 
@@ -216,25 +230,39 @@ def start_bot():
 @app.route("/stop_bot", methods=["POST"])
 def stop_bot():
     global bot_instance
-    if bot_instance and bot_instance.is_running():
-        bot_instance.stop()
-        flash("Bot stopped.", "success")
-    else:
+
+    if not bot_instance:
         flash("Bot is not running.", "warning")
+        return redirect(url_for("index"))
+
+    try:
+        # Gracefully disconnect Telethon client
+        bot_instance.client.loop.run_until_complete(bot_instance.client.disconnect())
+    except Exception as e:
+        app.logger.warning("Stop error (ignored): %s", e)
+    finally:
+        bot_instance = None
+
+    flash("Bot stopped.", "success")
     return redirect(url_for("index"))
 
 
-@app.route("/status")
+@app.route("/status", methods=["GET"])
 def status():
-    running = bool(bot_instance and bot_instance.is_running())
+    running = bool(bot_instance)
     return jsonify({"running": running})
 
 
-@app.route("/health")
+@app.route("/health", methods=["GET"])
 def health():
     return "OK", 200
 
 
+# ------------------------------------------------------------------------------
+# App startup
+# ------------------------------------------------------------------------------
+
 if __name__ == "__main__":
-    # Run the development server
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=False)
+    ensure_default_config()
+    # Local dev server (Render will run via gunicorn)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), debug=False)
