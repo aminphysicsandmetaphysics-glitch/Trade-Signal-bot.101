@@ -2,16 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 Flask dashboard for configuring and controlling a Telegram signal bot.
-
-این نسخه با کلاس جدید SignalBot که مقادیر را از متغیرهای محیطی می‌خواند سازگار است.
-قابلیت ذخیره و بازیابی تنظیمات از پایگاه داده، راه‌اندازی و توقف ربات، و مشاهدهٔ وضعیت اجرا را فراهم می‌کند.
+Compatible with new SignalBot (reads config from ENV) and supports multi-dest.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
 from threading import Thread
 
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
@@ -23,22 +20,26 @@ from signal_bot import SignalBot
 # ---------- Flask & SQLAlchemy setup ----------
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret")
-app.wsgi_app = ProxyFix(app.wsgi_app)  # نوع ترافیک Reverse‑Proxy را اصلاح می‌کند
+app.wsgi_app = ProxyFix(app.wsgi_app)  # reverse-proxy fix
 
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///signals.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 with app.app_context():
-    db.init_app(app)
+    # اگر در models.py از db = SQLAlchemy() استفاده شده، init_app لازم است؛
+    # اگر db = SQLAlchemy(app) است، این فراخوانی آسیبی نمی‌زند.
+    try:
+        db.init_app(app)  # safely no-op if already bound
+    except Exception:
+        pass
     db.create_all()
 
-# متغیر سراسری برای نگهداری نمونهٔ درحال اجرای ربات
+# single running instance
 bot_instance: SignalBot | None = None
-
 
 # ---------- Helpers ----------
 def _as_list(value: str | None) -> list[str]:
-    """یک رشته را (JSON list یا کاما جد) به لیست تبدیل می‌کند."""
+    """Accept JSON list or comma-separated string; return trimmed list[str]."""
     if not value:
         return []
     value = value.strip()
@@ -54,8 +55,8 @@ def _as_list(value: str | None) -> list[str]:
 
 def ensure_default_config() -> None:
     """
-    اگر جدول Config خالی باشد، مقدارهای اولیه را از متغیرهای محیطی می‌خواند
-    و همان رشته‌ها را ذخیره می‌کند.
+    Seed DB config from ENV if the table is empty.
+    NOTE: deliberately not using created_at/updated_at to be schema-agnostic.
     """
     with app.app_context():
         row = Config.query.first()
@@ -74,14 +75,12 @@ def ensure_default_config() -> None:
             session_name=session_name_env,
             from_channels=sources_env.strip(),
             to_channel=dests_env.strip(),
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
         )
         db.session.add(row)
         db.session.commit()
 
 def save_config_from_form() -> None:
-    """مقادیر ارسال‌شده از فرم را ذخیره می‌کند."""
+    """Persist posted form fields to Config (keep raw strings)."""
     api_id_raw = (request.form.get("api_id") or "").strip()
     api_id: int | None = int(api_id_raw) if api_id_raw.isdigit() else None
     api_hash = (request.form.get("api_hash") or "").strip()
@@ -92,7 +91,7 @@ def save_config_from_form() -> None:
     with app.app_context():
         cfg = Config.query.first()
         if not cfg:
-            cfg = Config(created_at=datetime.utcnow())
+            cfg = Config()
             db.session.add(cfg)
 
         cfg.api_id = api_id
@@ -100,24 +99,25 @@ def save_config_from_form() -> None:
         cfg.session_name = session_name
         cfg.from_channels = from_channels
         cfg.to_channel = to_channel
-        cfg.updated_at = datetime.utcnow()
+
         db.session.commit()
 
 def on_signal_saved(signal_dict: dict) -> None:
-    """اختیاری: ذخیرهٔ تاریخچهٔ پیام‌های فوروارد شده در جدول Signal."""
+    """Optional: keep a tiny history of forwarded signals."""
     try:
         with app.app_context():
+            # بدون created_at تا با هر اسکیما سازگار بماند
             s = Signal(
                 message_id=str(signal_dict.get("message_id", "")),
                 from_chat=str(signal_dict.get("from_chat", "")),
                 to_chats=json.dumps(signal_dict.get("to_chats", []), ensure_ascii=False),
                 text=signal_dict.get("text", ""),
-                created_at=datetime.utcnow(),
             )
             db.session.add(s)
             db.session.commit()
-    except Exception as e:
-        app.logger.exception("Failed to save signal: %s", e)
+    except Exception:
+        # اگر مدل Signal ستون‌های بالا را نداشت، بی‌صدا رد می‌کنیم تا ربات نخوابد.
+        pass
 
 # ---------- Routes ----------
 @app.route("/", methods=["GET"])
@@ -137,20 +137,17 @@ def start_bot():
     global bot_instance
 
     cfg = Config.query.first()
-    # در صورت نبود مقادیر ضروری:
     if not cfg or not cfg.api_id or not cfg.api_hash or not cfg.to_channel:
         flash("Please fill API ID, API HASH and destination channel.", "error")
         return redirect(url_for("index"))
-    # اگر ربات اجراست:
+
     if bot_instance:
         flash("Bot is already running.", "warning")
         return redirect(url_for("index"))
 
-    # کانال‌ها را به لیست تبدیل کن
     sources_list = _as_list(cfg.from_channels)
     dests_list = _as_list(cfg.to_channel)
 
-    # متغیرهای محیطی مورد نیاز ربات
     os.environ["API_ID"] = str(cfg.api_id)
     os.environ["API_HASH"] = cfg.api_hash
     os.environ["SESSION_NAME"] = cfg.session_name or "signal_bot"
