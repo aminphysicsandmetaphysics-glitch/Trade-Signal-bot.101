@@ -1,5 +1,5 @@
-telethon>=1.36.0
-Flask>=2.3.3
-Flask-SQLAlchemy>=3.0.2
-SQLAlchemy>=2.0.30
-gunicorn>=21.2.0
+Flask==3.0.3
+Werkzeug==3.0.3
+SQLAlchemy==2.0.31
+Telethon==1.36.0
+gunicorn==22.0.0
