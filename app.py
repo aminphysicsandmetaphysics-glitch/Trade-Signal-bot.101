@@ -43,7 +43,7 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 config_store = {
     "api_id": os.environ.get("API_ID", ""),
     "api_hash": os.environ.get("API_HASH", ""),
-    "session_name": os.environ.get("SESSION_NAME", "signal_bot"),
+    "session_string": os.environ.get("SESSION_STRING", ""),
     "from_channels": os.environ.get("SOURCES", ""),
     "to_channels": os.environ.get("DESTS", ""),
 }
@@ -97,7 +97,7 @@ def index():
 def save_config():
     api_id = request.form.get("api_id", "").strip()
     api_hash = request.form.get("api_hash", "").strip()
-    session_name = request.form.get("session_name", "signal_bot").strip()
+    session_string = request.form.get("session_string", "").strip()
     from_channels = request.form.get("from_channels", "").strip()
     to_channels = request.form.get("to_channels", "").strip()
 
@@ -105,7 +105,7 @@ def save_config():
         {
             "api_id": api_id,
             "api_hash": api_hash,
-            "session_name": session_name,
+            "session_string": session_string,
             "from_channels": from_channels,
             "to_channels": to_channels,
         }
@@ -134,7 +134,7 @@ def start_bot():
     bot_instance = SignalBot(
         api_id=int(cfg.get("api_id")),
         api_hash=cfg.get("api_hash"),
-        session_name=cfg.get("session_name") or "signal_bot",
+        session_string=cfg.get("session_string") or "",
         from_channels=from_channels,
         to_channels=to_channels,
         skip_rr_chat_ids=skip_rr,
