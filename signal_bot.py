@@ -26,6 +26,7 @@ from telethon.errors import (
     ChatAdminRequiredError,
     ChatWriteForbiddenError,
 )
+from telethon.sessions import StringSession
 
 # ----------------------------------------------------------------------------
 # Logging
@@ -304,7 +305,7 @@ class SignalBot:
         self,
         api_id: int,
         api_hash: str,
-        session_name: str,
+        session_string: str,
         from_channels: Iterable[Union[int, str]],
         to_channels: Iterable[Union[int, str]],
         skip_rr_chat_ids: Iterable[int] = (),
@@ -313,7 +314,7 @@ class SignalBot:
     ):
         self.api_id = api_id
         self.api_hash = api_hash
-        self.session_name = session_name
+        self.session_string = session_string
 
         # Normalise sources
         norm_from: List[Union[int, str]] = []
@@ -424,7 +425,7 @@ class SignalBot:
         while self._running:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            self.client = TelegramClient(self.session_name, self.api_id, self.api_hash)
+            self.client = TelegramClient(StringSession(self.session_string), self.api_id, self.api_hash)
             skip_rr_for = self.skip_rr_chat_ids
 
             @self.client.on(events.NewMessage(chats=self.from_channels, incoming=True))
@@ -538,7 +539,7 @@ if __name__ == "__main__":
     import json
     api_id = int(os.environ.get("API_ID", "29278288"))
     api_hash = os.environ.get("API_HASH", "8baff9421321d1ef6f14b0511209fbe2")
-    session_name = os.environ.get("SESSION_NAME", "signal_bot")
+    session_string = os.environ.get("SESSION_STRING", "")
     sources_env = os.environ.get("SOURCES", "[-1001467736193]")
     dest_env = os.environ.get("DESTS", "[\"sjkalalsk\"]")
 
@@ -556,7 +557,7 @@ if __name__ == "__main__":
     bot = SignalBot(
         api_id,
         api_hash,
-        session_name,
+        session_string,
         from_channels,
         to_channels,
         skip_rr_for,
