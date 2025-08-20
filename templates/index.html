@@ -15,9 +15,9 @@
     </div>
     <div class="row">
       <div class="col-6">
-        <label>Session Name</label>
-        <input name="session_name" value="{{ (cfg.session_name if cfg else 'signal_bot') or 'signal_bot' }}">
-        <small>فایل <code>{{ (cfg.session_name if cfg else 'signal_bot') or 'signal_bot' }}.session</code> باید کنار کد باشد.</small>
+        <label>Session String</label>
+        <textarea name="session_string" placeholder="session string">{{ (cfg.session_string if cfg else '') or '' }}</textarea>
+        <small>رشته‌ی سشن را در مکانی امن نگه دارید و منتشر نکنید.</small>
       </div>
       <div class="col-6">
         <label>کانال‌های مقصد (JSON یا لیست با کاما)</label>
