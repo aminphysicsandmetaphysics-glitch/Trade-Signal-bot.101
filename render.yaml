@@ -9,4 +9,4 @@ services:
       - key: PORT
         value: "5000"
       - key: SESSION_SECRET
-        value: "j5Qv4X0BgNuARyBuVF7Q65Hf92jWu45lnSUz2ErUFIA"
+        sync: false
