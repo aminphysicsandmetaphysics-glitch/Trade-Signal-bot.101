@@ -32,7 +32,12 @@ from signal_bot import SignalBot
 # ----------------------------------------------------------------------------
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret")
+
+secret = os.environ.get("SESSION_SECRET")
+if not secret:
+    raise RuntimeError("SESSION_SECRET environment variable must be set")
+app.secret_key = secret
+
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 
