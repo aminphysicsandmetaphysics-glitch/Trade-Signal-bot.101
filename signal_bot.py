@@ -519,6 +519,7 @@ class SignalBot:
                         self.client.disconnect()
                     except Exception:
                         pass
+                loop.close()
 
             if not self._running:
                 break
@@ -540,8 +541,8 @@ class SignalBot:
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
     import json
-    api_id = int(os.environ.get("API_ID", "29278288"))
-    api_hash = os.environ.get("API_HASH", "8baff9421321d1ef6f14b0511209fbe2")
+    api_id = int(os.environ["API_ID"])
+    api_hash = os.environ["API_HASH"]
     session_string = os.environ.get("SESSION_STRING", "")
     sources_env = os.environ.get("SOURCES", "[-1001467736193]")
     dest_env = os.environ.get("DESTS", "[\"sjkalalsk\"]")
