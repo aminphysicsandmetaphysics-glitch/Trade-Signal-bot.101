@@ -510,13 +510,17 @@ class SignalBot:
 
                 log.info("Client started. Waiting for messages...")
                 self.client.run_until_disconnected()
-                log.info("Client disconnected (run_until_disconnected returned).")
+                if self._running:
+                    log.warning("Network disconnect detected. Will attempt to reconnect.")
+                else:
+                    log.info("Stop requested. Exiting run loop.")
             except Exception as e:
                 log.error(f"Client error: {e}")
             finally:
                 if self.client:
                     try:
-                        self.client.disconnect()
+                        if self.client.loop.run_until_complete(self.client.is_connected()):
+                            self.client.loop.run_until_complete(self.client.disconnect())
                     except Exception:
                         pass
                 loop.close()
