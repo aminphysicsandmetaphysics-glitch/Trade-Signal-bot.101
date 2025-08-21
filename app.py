@@ -125,6 +125,10 @@ def start_bot():
         flash("Bot is already running.", "warning")
         return redirect(url_for("index"))
 
+    if not cfg.get("session_string"):
+        flash("Please provide session string.", "error")
+        return redirect(url_for("index"))
+
     # Parse sources and destinations
     from_channels = parse_from_channels(cfg.get("from_channels"))
     to_channels = parse_to_channels(cfg.get("to_channels"))
