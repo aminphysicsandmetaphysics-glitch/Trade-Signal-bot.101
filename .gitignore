@@ -1,4 +1,2 @@
-# ignore session and environment files
-*.session
-*.session-journal
+# ignore local environment files
 .env
