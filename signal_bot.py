@@ -418,7 +418,10 @@ class SignalBot:
         if self._running:
             log.info("Bot already running.")
             return
-
+        if not self.session_string:
+            log.error("Session string is missing; cannot start bot.")
+            return
+    
         self._running = True
         attempts = 0
 
