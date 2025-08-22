@@ -519,7 +519,12 @@ class SignalBot:
             finally:
                 if self.client:
                     try:
-                        if self.client.loop.run_until_complete(self.client.is_connected()):
+                        # Only disconnect here if stop() hasn't already done so via
+                        # asyncio.run_coroutine_threadsafe.
+                        if (
+                            self._running
+                            and self.client.loop.run_until_complete(self.client.is_connected())
+                        ):
                             self.client.loop.run_until_complete(self.client.disconnect())
                     except Exception:
                         pass
