@@ -509,29 +509,34 @@ class SignalBot:
                 self.client.loop.run_until_complete(_verify())
 
                 log.info("Client started. Waiting for messages...")
-                try:
-                    self.client.run_until_disconnected()
-                except (ConnectionError, asyncio.TimeoutError):
-                    async def _reconnect():
-                        retries = 0
-                        while retries < 3 and self._running:
-                            try:
-                                await self.client.connect()
-                                return True
-                            except (ConnectionError, asyncio.TimeoutError):
-                                retries += 1
-                                if retries >= 3:
-                                    return False
-                                await asyncio.sleep(self.retry_delay)
+                while self._running:
+                    try:
+                        self.client.run_until_disconnected()
+                    except (ConnectionError, asyncio.TimeoutError):
+                        async def _reconnect():
+                            retries = 0
+                            while retries < 3 and self._running:
+                                try:
+                                    await self.client.connect()
+                                    return True
+                                except (ConnectionError, asyncio.TimeoutError):
+                                    retries += 1
+                                    if retries >= 3:
+                                        return False
+                                    await asyncio.sleep(self.retry_delay)
 
-                    if not self.client.loop.run_until_complete(_reconnect()):
-                        log.error("Reconnection attempts failed. Will retry.")
+                        if not self.client.loop.run_until_complete(_reconnect()):
+                            log.error("Reconnection attempts failed. Will retry.")
+                            break
+                        else:
+                            log.warning(
+                                "Network disconnect detected. Reconnected successfully."
+                            )
+                            continue
                     else:
-                        log.warning(
-                            "Network disconnect detected. Reconnected successfully."
-                        )
-                else:
-                    log.info("Stop requested. Exiting run loop.")
+                        log.info("Stop requested. Exiting run loop.")
+                        break
+                        
             except Exception as e:
                 log.error(f"Client error: {e}")
             finally:
