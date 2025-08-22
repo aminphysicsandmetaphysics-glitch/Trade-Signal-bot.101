@@ -509,8 +509,25 @@ class SignalBot:
                 self.client.loop.run_until_complete(_verify())
 
                 log.info("Client started. Waiting for messages...")
-                self.client.run_until_disconnected()
-                if self._running:
+                try:
+                    self.client.run_until_disconnected()
+                except (ConnectionError, asyncio.TimeoutError):
+                    async def _reconnect():
+                        retries = 0
+                        while retries < 3 and self._running:
+                            try:
+                                await self.client.connect()
+                                return True
+                            except (ConnectionError, asyncio.TimeoutError):
+                                retries += 1
+                                if retries >= 3:
+                                    return False
+                                await asyncio.sleep(self.retry_delay)
+
+                    if not self.client.loop.run_until_complete(_reconnect()):
+                        log.error("Reconnection attempts failed. Stopping bot.")
+                        self._running = False
+                        if self._running:
                     log.warning("Network disconnect detected. Will attempt to reconnect.")
                 else:
                     log.info("Stop requested. Exiting run loop.")
