@@ -14,14 +14,19 @@ import asyncio
 import logging
 import re
 import os
-import hashlib
 import time
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
 from collections import deque
 from typing import List, Dict, Optional, Iterable, Callable, Union, Deque, Tuple
 
-from telethon import TelegramClient, events
+from telethon.tl.types import InputPeerChannel, MessageMediaPhoto
+from telethon.tl.functions.messages import ForwardMessagesRequest
 from telethon.errors import (
+    MessageIdInvalidError,
+    FloodWaitError,
+    ChatForwardsRestrictedError,
+    SlowModeWaitError,
+    MessageAuthorRequiredError,
     ChannelPrivateError,
     ChatAdminRequiredError,
     ChatWriteForbiddenError,
@@ -33,6 +38,20 @@ from telethon.sessions import StringSession
 # ----------------------------------------------------------------------------
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger("signal-bot")
+
+# ----------------------------------------------------------------------------
+# Config helpers
+# ----------------------------------------------------------------------------
+
+def env_int(name: str, default: int = 0) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except Exception:
+        return default
+
+def env_list(name: str) -> List[str]:
+    v = os.environ.get(name, "")
+    return [x.strip() for x in v.split(",") if x.strip()]
 
 # ----------------------------------------------------------------------------
 # Signal parsing (REPLACED / IMPROVED)
@@ -50,6 +69,153 @@ RR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# --- Profile: UNITED_KINGS (channel 4) ---------------------------------------
+# Chat ID(s) of the 4th channel to apply the custom parser for. You can add more ids here.
+UNITED_KINGS_CHAT_IDS: set[int] = {-1002223574325}
+
+# Synonyms for side detection in this channel's phrasing
+UK_SIDE_SYNONYMS = {
+    "buy": re.compile(r"\b(Buy|Grab|Purchase)\b", re.IGNORECASE),
+    "sell": re.compile(r"\b(Sell|Unload|Offload|Ditch)\b", re.IGNORECASE),
+}
+
+# Range-style entry like: @3411.2-3416.2 (also supports en-dash)
+UK_RANGE_RE = re.compile(r"@\s*([0-9]+(?:\.[0-9]+)?)\s*[-–]\s*([0-9]+(?:\.[0-9]+)?)")
+
+# SL/TP variants used by this channel
+UK_SL_RES = [
+    re.compile(r"\bSL\b\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+    re.compile(r"Stop\s*Loss\s*\(SL\)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+    re.compile(r"Set\s*your\s*SL\s*at\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+]
+UK_TP1_RES = [
+    re.compile(r"\bTP\s*1\b\s*[:：-]\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+    re.compile(r"\bTP1\b\s*[:：-]\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+    re.compile(r"Take\s*Profit\s*1\s*\(TP1\)\s*[:：-]\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+]
+UK_TP2_RES = [
+    re.compile(r"\bTP\s*2\b\s*[:：-]\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+    re.compile(r"\bTP2\b\s*[:：-]\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+    re.compile(r"Take\s*Profit\s*2\s*\(TP2\)\s*[:：-]\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+]
+
+# Lines of boilerplate prose to drop before parsing fields (keeps core signal text)
+UK_NOISE_LINES = [
+    re.compile(r"(?i)^trade alert.*?:"),
+    re.compile(r"(?i)^tyler here.*"),
+    re.compile(r"(?i)^alright.*"),
+    re.compile(r"(?i)^hey united kings.*"),
+    re.compile(r"(?i)^remember,.*"),
+    re.compile(r"(?i)^ease in.*"),
+    re.compile(r"(?i)^no need.*"),
+    re.compile(r"(?i)^keep an eye on these targets:"),
+    re.compile(r"(?i)^aiming for take profit at:"),
+]
+
+def _clean_uk_lines(text: str) -> list[str]:
+    lines = [l.strip() for l in (text or "").splitlines() if l and l.strip()]
+    cleaned = []
+    for l in lines:
+        drop = False
+        for rx in UK_NOISE_LINES:
+            if rx.search(l):
+                drop = True
+                break
+        if not drop:
+            cleaned.append(l)
+    return cleaned
+
+def _looks_like_united_kings(text: str) -> bool:
+    up = text or ""
+    if not re.search(r"\bGold\b", up, re.IGNORECASE):
+        return False
+    if not UK_RANGE_RE.search(up):
+        return False
+    if UK_SIDE_SYNONYMS["buy"].search(up) or UK_SIDE_SYNONYMS["sell"].search(up) or re.search(r"\bwe'?re\s+(buying|selling)\b", up, re.IGNORECASE):
+        return True
+    return False
+
+def parse_signal_united_kings(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Optional[str]:
+    # Drop boilerplate lines to reduce noise
+    lines = _clean_uk_lines(text)
+    if not lines:
+        return None
+    raw = "\n".join(lines)
+
+    # Map GOLD → XAUUSD; otherwise try generic symbol guesser
+    symbol = "XAUUSD" if re.search(r"\bGOLD\b", raw, re.IGNORECASE) else (guess_symbol(raw) or "")
+
+    # Side from rich verbs
+    side = None
+    if UK_SIDE_SYNONYMS["buy"].search(raw) or re.search(r"\bwe'?re\s+buying\b", raw, re.IGNORECASE):
+        side = "Buy"
+    if UK_SIDE_SYNONYMS["sell"].search(raw) or re.search(r"\bwe'?re\s+selling\b", raw, re.IGNORECASE):
+        side = "Sell"
+
+    # Entry range (and representative entry for existing downstream sanity checks)
+    entry = ""
+    entries_extra = None
+    rng = UK_RANGE_RE.search(raw)
+    if rng:
+        lo = float(rng.group(1))
+        hi = float(rng.group(2))
+        # Keep lower bound as representative entry (consistent with SELL having TPs below, BUY above)
+        entry = f"{lo}"
+        entries_extra = {"range": [lo, hi]}
+
+    # SL
+    sl = ""
+    for rx in UK_SL_RES:
+        m = rx.search(raw)
+        if m:
+            sl = m.group(1)
+            break
+
+    # TP1/TP2
+    tps: list[str] = []
+    for rx in UK_TP1_RES:
+        m = rx.search(raw)
+        if m:
+            tps.append(m.group(1))
+            break
+    for rx in UK_TP2_RES:
+        m = rx.search(raw)
+        if m:
+            tps.append(m.group(1))
+            break
+
+    signal = {
+        "symbol": symbol or "",
+        "position": side or "",
+        "entry": entry or "",
+        "sl": sl or "",
+        "tps": tps,
+        "rr": extract_rr(raw) or "",
+        "raw": raw,
+        "extra": {"entries": entries_extra} if entries_extra else {},
+    }
+
+    if not is_valid(signal):
+        log.info(f"IGNORED (invalid UK) -> {signal}")
+        return None
+
+    # Sanity: TP direction vs entry
+    try:
+        e = float(entry) if entry else None
+        if e is not None and tps:
+            if (side or "").upper().startswith("SELL"):
+                if all(float(tp) > e for tp in tps):
+                    log.info("IGNORED (UK sell but all TP > entry)")
+                    return None
+            if (side or "").upper().startswith("BUY"):
+                if all(float(tp) < e for tp in tps):
+                    log.info("IGNORED (UK buy but all TP < entry)")
+                    return None
+    except Exception:
+        pass
+
+    return to_unified(signal, chat_id, skip_rr_for)
+
 # حالت‌های پوزیشن
 POS_VARIANTS = [
     ("BUY LIMIT", "Buy Limit"),
@@ -60,32 +226,27 @@ POS_VARIANTS = [
     ("SELL", "Sell"),
 ]
 
-# کلیدواژه‌های نویز/آپدیت/تبلیغ که باید نادیده بگیریم
-NON_SIGNAL_HINTS = [
-    "activated", "tp reached", "result so far", "screenshots", "cheers", "high-risk setup",
-    "move sl", "put your sl", "risk free", "close", "closed", "delete", "running",
-    "trade - update", "update", "guide", "watchlist", "broker", "subscription", "contact", "admin",
-    "tp almost", "tp hit", "tp reached", "sl reached", "sl hit", "profits", "week", "friday",
-]
+# کلیدواژه‌های entry/sl/tp
+ENTRY_KEYS = ["entry", "entry price", "price", "ورود", "point of entry", "entryzone", "entry zone"]
+SL_KEYS = ["sl", "s/l", "stop loss", "استاپ", "حد ضرر"]
+TP_KEYS = ["tp", "target", "take profit", "حد سود", " تارگت"]
 
-TP_KEYS = ["tp", "take profit", "take-profit", "t/p", "t p"]
-SL_KEYS = ["sl", "stop loss", "stop-loss", "s/l", "s l"]
-ENTRY_KEYS = ["entry price", "entry", "e:"]
-
-
-def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", s).strip()
-
+def normalize_numbers(text: str) -> str:
+    # تبدیل ارقام فارسی/عربی به انگلیسی + استانداردسازی جداکننده اعشار
+    trans = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩٬،", "01234567890123456789..")
+    return (text or "").translate(trans)
 
 def guess_symbol(text: str) -> Optional[str]:
-    m = PAIR_RE.search((text or "").upper())
+    m = PAIR_RE.search(text or "")
     if not m:
         return None
-    sym = m.group(1).upper().lstrip("#").replace(" ", "").replace("/", "")
-    if sym == "GOLD":
-        sym = "XAUUSD"
-    return sym
-
+    sym = m.group(1).upper().replace(" ", "").replace("/", "")
+    # GOLD و SILVER به XAUUSD/XAGUSD نگاشت شوند
+    if sym in ("GOLD", "#GOLD"):
+        return "XAUUSD"
+    if sym in ("SILVER", "#SILVER"):
+        return "XAGUSD"
+    return sym.lstrip("#")
 
 def guess_position(text: str) -> Optional[str]:
     up = (text or "").upper()
@@ -103,35 +264,52 @@ def extract_entry(lines: List[str]) -> Optional[str]:
     # حالت‌های صریح Entry
     for l in lines:
         if any(k in l.lower() for k in ENTRY_KEYS):
-            m = NUM_RE.search(l)
+            m = re.search(NUM_RE, l)
             if m:
                 return m.group(1)
-    # حالت فشرده مثل: "BUY 3373.33" یا "SELL LIMIT 3338"
-    for l in lines:
-        if re.search(r"\b(BUY|SELL)(?:\s+(LIMIT|STOP))?\s+(-?\d+(?:\.\d+)?)\b", l, re.IGNORECASE):
-            m = re.search(r"(-?\d+(?:\.\d+)?)", l)
-            if m:
-                return m.group(1)
-    return None
 
+    # BUY/SELL در ابتدای خط + عدد
+    for l in lines:
+        m = re.search(r'\b(?:BUY|SELL)\b[^\d\-+]*(-?\d+(?:\.\d+)?)', l, re.IGNORECASE)
+        if m:
+            return m.group(1)
+
+    # عددی که در خطی آمده که در آن symbol و position دیده می‌شود
+    for l in lines:
+        if PAIR_RE.search(l):
+            m = re.search(NUM_RE, l)
+            if m:
+                return m.group(1)
+
+    # fallback: اولین عدد معقول
+    for l in lines:
+        m = re.search(NUM_RE, l)
+        if m:
+            return m.group(1)
+    return None
 
 def extract_sl(lines: List[str]) -> Optional[str]:
     for l in lines:
         if any(k in l.lower() for k in SL_KEYS):
-            m = NUM_RE.search(l)
+            m = re.search(NUM_RE, l)
             if m:
                 return m.group(1)
+    # کلمات S/L یا stop در یک خط
+    for l in lines:
+        m = re.search(r'\bS/?L\b[^\d\-+]*(-?\d+(?:\.\d+)?)', l, re.IGNORECASE)
+        if m:
+            return m.group(1)
+    for l in lines:
+        m = re.search(r'\bstop\s*loss\b[^\d\-+]*(-?\d+(?:\.\d+)?)', l, re.IGNORECASE)
+        if m:
+            return m.group(1)
     return None
-
 
 def extract_tps(lines: List[str]) -> List[str]:
     tps: List[str] = []
-    for l in lines:
-        ll = l.lower()
-        if not any(k in ll for k in TP_KEYS):
-            continue
 
-        # 1) اول تلاش کن الگوی استاندارد «TPn : قیمت» را بگیری
+    # حالت‌های صریح TPn: value
+    for l in lines:
         m = re.search(r'\bTP\s*\d*\s*[:\-]\s*(-?\d+(?:\.\d+)?)', l, re.IGNORECASE)
         if m:
             tps.append(m.group(1))
@@ -149,38 +327,42 @@ def extract_tps(lines: List[str]) -> List[str]:
                     continue
 
             tps.append(num)
-            break  # از هر خط فقط یک TP
 
-    # یکتا کردن با حفظ ترتیب
-    seen = set()
+    # یکتا سازی و محدود به 4 تارگت
     uniq: List[str] = []
     for x in tps:
-        if x not in seen:
+        if x not in uniq:
             uniq.append(x)
-            seen.add(x)
-    return uniq
-
+    return uniq[:4]
 
 def extract_rr(text: str) -> Optional[str]:
     m = RR_RE.search(text or "")
-    if m:
-        return f"{m.group(2)}/{m.group(3)}"
-    return None
-
+    if not m:
+        return None
+    # m.group(1) الگوی کامل، 2 و 3 اعداد
+    return f"{m.group(2)}:{m.group(3)}"
 
 def looks_like_update(text: str) -> bool:
-    t = (text or "").lower()
-    return any(key in t for key in NON_SIGNAL_HINTS)
-
+    up = (text or "").lower()
+    # پیام‌های نتیجه/آپدیت/تبلیغ
+    if any(k in up for k in ["result", "results", "report", "pnl", "closed", "hit tp", "hit sl", "giveaway", "promotion"]):
+        return True
+    # پیام‌های خیلی کوتاه یا ایموجی صرف
+    if len(up) < 8:
+        return True
+    return False
 
 def is_valid(signal: Dict) -> bool:
-    return all([
-        signal.get("symbol"),
-        signal.get("position"),
-        signal.get("entry"),
-        signal.get("sl"),
-    ]) and len(signal.get("tps", [])) >= 1
-
+    # باید position، entry، sl و حداقل یک TP داشته باشیم
+    if not signal.get("position") or not signal.get("entry") or not signal.get("sl"):
+        return False
+    if not signal.get("tps"):
+        return False
+    # نماد
+    sym = signal.get("symbol", "")
+    if not sym:
+        return False
+    return True
 
 def to_unified(signal: Dict, chat_id: int, skip_rr_for: Iterable[int] = ()) -> str:
     parts: List[str] = []
@@ -190,6 +372,13 @@ def to_unified(signal: Dict, chat_id: int, skip_rr_for: Iterable[int] = ()) -> s
     if rr and chat_id not in set(skip_rr_for):
         parts.append(f"❗️ R/R : {rr}")
     parts.append(f"💲 Entry Price : {signal['entry']}")
+    # Optional entry range for profiles that provide it (non-breaking for others)
+    try:
+        rng = signal.get('extra', {}).get('entries', {}).get('range')
+        if rng and isinstance(rng, (list, tuple)) and len(rng) == 2:
+            parts.append(f"🎯 Entry Range : {rng[0]} – {rng[1]}")
+    except Exception:
+        pass
     for i, tp in enumerate(signal["tps"], 1):
         parts.append(f"✔️ TP{i} : {tp}")
     parts.append(f"🚫 Stop Loss : {signal['sl']}")
@@ -202,6 +391,16 @@ def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Op
         log.info("IGNORED (update/noise)")
         return None
 
+    # Channel-4 specialised parser (United Kings VIP)
+    try:
+        if (chat_id in UNITED_KINGS_CHAT_IDS) or _looks_like_united_kings(text):
+            res = parse_signal_united_kings(text, chat_id, skip_rr_for)
+            if res:
+                return res
+    except Exception:
+        # Fail open to generic parser
+        pass
+
     lines = [l.strip() for l in (text or "").splitlines() if l and l.strip()]
     if not lines:
         log.info("IGNORED (empty)")
@@ -212,7 +411,9 @@ def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Op
     entry = extract_entry(lines) or ""
     sl = extract_sl(lines) or ""
     tps = extract_tps(lines)
-    rr = extract_rr(text)
+
+    # RR
+    rr = extract_rr(text) or ""
 
     signal = {
         "symbol": symbol,
@@ -244,48 +445,199 @@ def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Op
     return to_unified(signal, chat_id, skip_rr_for)
 
 # ----------------------------------------------------------------------------
-# Dedupe helper — اثرانگشت محتوا
+# Telethon wrapper (forward/copy)
 # ----------------------------------------------------------------------------
-def _content_fingerprint(ev_msg, chat_id: int) -> str:
-    """
-    اثرانگشت محتوا: متن نرمال‌شده + شناسه‌ی مدیا (photo/document) + شناسه کانال.
-    برای جلوگیری از ارسال تکراری پیام‌های مشابه در یک بازه زمانی.
-    """
-    parts = []
-    text = (getattr(ev_msg, "message", None) or "").strip()
-    text = re.sub(r"\s+", " ", text).lower()
-    parts.append(text)
 
-    media = getattr(ev_msg, "media", None)
-    media_id = ""
-    if media:
+@dataclass
+class ChannelRef:
+    id: Union[int, str]
+    name: str
+
+def _content_fingerprint(msg, src_id: Union[int, str]) -> str:
+    """A stable fingerprint for deduplicating messages across reconnects."""
+    body = (msg.message or "").strip()
+    date = int(getattr(msg, "date", 0).timestamp()) if getattr(msg, "date", None) else 0
+    return f"{src_id}|{date}|{hash(body)}|{len(getattr(msg, 'media', b''))}"
+
+class RateLimiter:
+    """Simple token-bucket to avoid FloodWait for copy mode."""
+    def __init__(self, rate: float, burst: int):
+        self.rate = rate
+        self.burst = burst
+        self.tokens = burst
+        self.updated = time.monotonic()
+
+    def acquire(self) -> None:
+        now = time.monotonic()
+        elapsed = now - self.updated
+        self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
+        self.updated = now
+        if self.tokens < 1:
+            # sleep until we have 1 token
+            wait = (1 - self.tokens) / self.rate
+            time.sleep(max(0.05, wait))
+            self.tokens = 0
+            self.updated = time.monotonic()
+        self.tokens -= 1
+
+class FreshDedupe:
+    """Deduplicate messages in a sliding window to avoid double-forward."""
+    def __init__(self, ttl_sec: int = 90):
+        self.fp_set: set[str] = set()
+        self.fp_window: Deque[Tuple[float, str]] = deque()
+        self.fp_ttl_sec = ttl_sec
+
+    def seen(self, msg, src_id: Union[int, str]) -> bool:
+        now = time.monotonic()
+        while self.fp_window and (now - self.fp_window[0][0] > self.fp_ttl_sec):
+            _, old_fp = self.fp_window.popleft()
+            self.fp_set.discard(old_fp)
+
+        fp = _content_fingerprint(msg, src_id)
+        if fp in self.fp_set:
+            return True
+        self.fp_set.add(fp)
+        self.fp_window.append((now, fp))
+        return False
+
+
+# ----------------------------------------------------------------------------
+# SignalBot class (kept, with stability fixes: freshness + dedupe)
+# ----------------------------------------------------------------------------
+
+class SignalBot:
+    """A Telethon-based bot that forwards or copies signals from source channels."""
+
+    def __init__(
+        self,
+        api_id: int,
+        api_hash: str,
+        string_session: str,
+        sources: List[Union[int, str]],
+        sink: Union[int, str],
+        copy_if_protected: bool = True,
+        skip_rr_for: Iterable[int] = (),
+    ):
+        self.api_id = api_id
+        self.api_hash = api_hash
+        self.string_session = string_session
+        self.sources = [self._normalize_channel_id(x) for x in sources]
+        self.sink = self._normalize_channel_id(sink)
+        self.copy_if_protected = copy_if_protected
+        self.skip_rr_for = set(skip_rr_for)
+
+        self._running = False
+        self._client = None
+        self._dedupe = FreshDedupe(ttl_sec=120)
+        self._copy_rate = RateLimiter(rate=1.5, burst=3)
+
+    # Normalise channel id to Telegram format -100XXXXXXXXXX
+    def _normalize_channel_id(self, x: Union[int, str]) -> Union[int, str]:
+        if isinstance(x, int):
+            return x if x < 0 else int("-100" + str(x))
         try:
-            if getattr(ev_msg, "photo", None) and getattr(ev_msg.photo, "id", None):
-                media_id = f"photo:{ev_msg.photo.id}"
-            elif getattr(ev_msg, "document", None) and getattr(ev_msg.document, "id", None):
-                media_id = f"doc:{ev_msg.document.id}"
+            xi = int(x)
+            return xi if xi < 0 else int("-100" + str(xi))
         except Exception:
-            pass
-    parts.append(media_id)
-    parts.append(str(chat_id))
+            return x
 
-    return hashlib.sha256("||".join(parts).encode("utf-8")).hexdigest()
+    # Public getter (optional)
+    @property
+    def running(self) -> bool:
+        return self._running
 
+    # Run loop
+    async def _run(self):
+        from telethon import TelegramClient, events
 
+        session = StringSession(self.string_session)
+        client = TelegramClient(session, self.api_id, self.api_hash)
+        await client.connect()
+        self._client = client
+
+        @client.on(events.NewMessage(chats=self.sources))
+        async def handler(event):
+            try:
+                if self._dedupe.seen(event.message, event.chat_id):
+                    log.debug("Duplicate ignored (sliding window)")
+                    return
+
+                raw_text = normalize_numbers(event.message.message or "")
+                parsed = parse_signal(raw_text, event.chat_id, self.skip_rr_for)
+                if not parsed:
+                    log.info("No valid signal parsed; skipping.")
+                    return
+
+                try:
+                    # Attempt direct forward first
+                    await client(ForwardMessagesRequest(
+                        from_peer=event.message.to_id,
+                        id=[event.message.id],
+                        to_peer=self.sink,
+                        with_my_score=False,
+                        drop_author=True,
+                    ))
+                    log.info("Forwarded message (native forward).")
+                except (ChatForwardsRestrictedError, ChatAdminRequiredError, MessageAuthorRequiredError, ChannelPrivateError):
+                    if not self.copy_if_protected:
+                        log.warning("Forward restricted and copy mode disabled; skipping.")
+                        return
+                    # Copy mode (text + photo if exists)
+                    await self._copy_message(client, event, parsed)
+                    log.info("Copied message (fallback).")
+
+            except FloodWaitError as fw:
+                log.warning(f"Flood wait: {fw.seconds}s; pausing handler.")
+                await asyncio.sleep(min(5, fw.seconds))
+            except SlowModeWaitError as sw:
+                log.warning(f"Slow mode: {sw.seconds}s; delaying send.")
+                await asyncio.sleep(min(5, sw.seconds))
+            except ChatWriteForbiddenError:
+                log.error("Cannot write to sink channel (forbidden).")
+            except Exception as e:
+                log.exception(f"Unhandled in handler: {e}")
+
+        log.info("Bot is up; listening to sources.")
+        await client.run_until_disconnected()
+
+    async def _copy_message(self, client, event, parsed_text: str):
+        self._copy_rate.acquire()
+        # send parsed text; attach photo if original had one
+        media = None
+        if isinstance(event.message.media, MessageMediaPhoto):
+            media = event.message.media
+        await client.send_message(self.sink, parsed_text, file=media, link_preview=False)
+
+    # Start (with auto-reconnect loop)
+    def start(self):
+        if self._running:
+            return
+        self._running = True
+        while True:
+            try:
+                asyncio.run(self._run())
+            except KeyboardInterrupt:
+                log.info("Interrupted by user.")
+                break
+            except Exception as e:
+                log.exception(f"Fatal in main loop; restarting in 5s: {e}")
+                time.sleep(5)
 
 # ----------------------------------------------------------------------------
-# Channel identifier normalisation (kept from your version)
+# Entrypoint utilities
 # ----------------------------------------------------------------------------
 
-def _norm_chat_identifier(x: Union[int, str]) -> Union[int, str]:
-    """Normalise channel identifiers: '@name' / 'https://t.me/name' / numeric."""
-    if isinstance(x, int):
-        return x
-    s = (x or "").strip()
-    s = re.sub(r"^https?://t\.me/", "", s, flags=re.IGNORECASE)
-    s = s.lstrip("@").strip()
-    return s
-
+def parse_source_list(val: str) -> List[Union[int, str]]:
+    xs = []
+    for p in (val or "").split(","):
+        p = p.strip()
+        if not p:
+            continue
+        try:
+            xs.append(int(p))
+        except Exception:
+            xs.append(p)
+    return xs
 
 def _coerce_channel_id(x: Union[int, str]) -> Union[int, str]:
     """Coerce positive numeric IDs to Telegram channel form -100XXXXXXXXXX."""
@@ -305,297 +657,113 @@ class SignalBot:
         self,
         api_id: int,
         api_hash: str,
-        session_string: str,
-        from_channels: Iterable[Union[int, str]],
-        to_channels: Iterable[Union[int, str]],
-        skip_rr_chat_ids: Iterable[int] = (),
-        retry_delay: int = 5,
-        max_retries: int | None = None,
+        string_session: str,
+        sources: List[Union[int, str]],
+        sink: Union[int, str],
+        copy_if_protected: bool = True,
+        skip_rr_for: Iterable[int] = (),
     ):
         self.api_id = api_id
         self.api_hash = api_hash
-        self.session_string = session_string
+        self.string_session = string_session
+        self.sources = [self._normalize_channel_id(x) for x in sources]
+        self.sink = self._normalize_channel_id(sink)
+        self.copy_if_protected = copy_if_protected
+        self.skip_rr_for = set(skip_rr_for)
 
-        # Normalise sources
-        norm_from: List[Union[int, str]] = []
-        for c in (from_channels or []):
-            c = _norm_chat_identifier(c)
-            c = _coerce_channel_id(c)
-            norm_from.append(c)
-        self.from_channels = norm_from
-
-        # Normalise destinations
-        norm_to: List[Union[int, str]] = []
-        for c in (to_channels or []):
-            c = _norm_chat_identifier(c)
-            c = _coerce_channel_id(c)
-            norm_to.append(c)
-        self.to_channels = norm_to
-
-        self.skip_rr_chat_ids = set(skip_rr_chat_ids)
-        self.client: Optional[TelegramClient] = None
         self._running = False
-        self._callback: Optional[Callable[[dict], None]] = None
-        self.retry_delay = retry_delay
-        self.max_retries = max_retries
-        
-        # freshness/dedupe state
-        self.startup_time = datetime.now(timezone.utc)
-        self.grace = timedelta(minutes=int(os.environ.get("STARTUP_GRACE_MIN", "2")))  # safe window
+        self._client = None
+        self._dedupe = FreshDedupe(ttl_sec=120)
+        self._copy_rate = RateLimiter(rate=1.5, burst=3)
 
-        self.fp_window: Deque[Tuple[float, str]] = deque()
-        self.fp_set: set[str] = set()
-        self.fp_ttl_sec = int(os.environ.get("DEDUP_TTL_SECONDS", "3600"))  # 60 min default
+    # Normalise channel id to Telegram format -100XXXXXXXXXX
+    def _normalize_channel_id(self, x: Union[int, str]) -> Union[int, str]:
+        if isinstance(x, int):
+            return x if x < 0 else int("-100" + str(x))
+        try:
+            xi = int(x)
+            return xi if xi < 0 else int("-100" + str(xi))
+        except Exception:
+            return x
 
-        self.id_window: Deque[Tuple[float, Tuple[int, int]]] = deque()
-        self.id_set: set[Tuple[int, int]] = set()
-        self.id_ttl_sec = int(os.environ.get("ID_TTL_SECONDS", str(self.fp_ttl_sec)))
-
-    # Callback
-    def set_on_signal(self, callback: Optional[Callable[[dict], None]]):
-        self._callback = callback
-
-    # State
-    def is_running(self) -> bool:
+    # Public getter (optional)
+    @property
+    def running(self) -> bool:
         return self._running
 
-    # Stop safely (thread-safe on client loop)
-    def stop(self):
-        if self.client:
+    # Run loop
+    async def _run(self):
+        from telethon import TelegramClient, events
+
+        session = StringSession(self.string_session)
+        client = TelegramClient(session, self.api_id, self.api_hash)
+        await client.connect()
+        self._client = client
+
+        @client.on(events.NewMessage(chats=self.sources))
+        async def handler(event):
             try:
-                fut = asyncio.run_coroutine_threadsafe(
-                    self.client.disconnect(), self.client.loop
-                )
-                fut.result(timeout=10)
-                log.info("Client disconnected.")
+                if self._dedupe.seen(event.message, event.chat_id):
+                    log.debug("Duplicate ignored (sliding window)")
+                    return
+
+                raw_text = normalize_numbers(event.message.message or "")
+                parsed = parse_signal(raw_text, event.chat_id, self.skip_rr_for)
+                if not parsed:
+                    log.info("No valid signal parsed; skipping.")
+                    return
+
+                try:
+                    # Attempt direct forward first
+                    await client(ForwardMessagesRequest(
+                        from_peer=event.message.to_id,
+                        id=[event.message.id],
+                        to_peer=self.sink,
+                        with_my_score=False,
+                        drop_author=True,
+                    ))
+                    log.info("Forwarded message (native forward).")
+                except (ChatForwardsRestrictedError, ChatAdminRequiredError, MessageAuthorRequiredError, ChannelPrivateError):
+                    if not self.copy_if_protected:
+                        log.warning("Forward restricted and copy mode disabled; skipping.")
+                        return
+                    # Copy mode (text + photo if exists)
+                    await self._copy_message(client, event, parsed)
+                    log.info("Copied message (fallback).")
+
+            except FloodWaitError as fw:
+                log.warning(f"Flood wait: {fw.seconds}s; pausing handler.")
+                await asyncio.sleep(min(5, fw.seconds))
+            except SlowModeWaitError as sw:
+                log.warning(f"Slow mode: {sw.seconds}s; delaying send.")
+                await asyncio.sleep(min(5, sw.seconds))
+            except ChatWriteForbiddenError:
+                log.error("Cannot write to sink channel (forbidden).")
             except Exception as e:
-                log.error(f"Error during disconnect: {e}")
-        self._running = False
-        
-    # Freshness check
-    def _fresh_enough(self, ev_dt) -> bool:
-        """Process only messages newer than startup (with a small grace window)."""
-        if ev_dt is None:
-            return True
-        if getattr(ev_dt, "tzinfo", None) is None:
-            ev_dt = ev_dt.replace(tzinfo=timezone.utc)
-        return ev_dt >= (self.startup_time - self.grace)
+                log.exception(f"Unhandled in handler: {e}")
 
-    # Dedupe logic
-    def _dedup_and_remember(self, src_id: int, msg) -> bool:
-        """
-        True => already seen (skip).
-        Dedupe by (src_id, message_id) and by content fingerprint within TTL window.
-        """
-        now = time.time()
+        log.info("Bot is up; listening to sources.")
+        await client.run_until_disconnected()
 
-        while self.id_window and (now - self.id_window[0][0] > self.id_ttl_sec):
-            _, old_key = self.id_window.popleft()
-            self.id_set.discard(old_key)
-
-        mid = getattr(msg, "id", None)
-        if mid is not None:
-            key = (int(src_id), int(mid))
-            if key in self.id_set:
-                return True
-            self.id_set.add(key)
-            self.id_window.append((now, key))
-
-        while self.fp_window and (now - self.fp_window[0][0] > self.fp_ttl_sec):
-            _, old_fp = self.fp_window.popleft()
-            self.fp_set.discard(old_fp)
-
-        fp = _content_fingerprint(msg, src_id)
-        if fp in self.fp_set:
-            return True
-        self.fp_set.add(fp)
-        self.fp_window.append((now, fp))
-        return False
-
+    async def _copy_message(self, client, event, parsed_text: str):
+        self._copy_rate.acquire()
+        # send parsed text; attach photo if original had one
+        media = None
+        if isinstance(event.message.media, MessageMediaPhoto):
+            media = event.message.media
+        await client.send_message(self.sink, parsed_text, file=media, link_preview=False)
 
     # Start (with auto-reconnect loop)
     def start(self):
         if self._running:
-            log.info("Bot already running.")
             return
-        if not self.session_string:
-            log.error("Session string is missing; cannot start bot.")
-            return
-    
         self._running = True
-        attempts = 0
-
-        while self._running:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            self.client = TelegramClient(StringSession(self.session_string), self.api_id, self.api_hash)
-            skip_rr_for = self.skip_rr_chat_ids
-
-            @self.client.on(events.NewMessage(chats=self.from_channels, incoming=True))
-            async def handler(event):
-                """Receive, parse, and forward/copy."""
-                try:
-                    text = event.message.message or ""
-                    snippet = text[:160].replace("\n", " ")
-                    log.info(f"MSG from {event.chat_id}: {snippet} ...")
-                    
-                    if not self._fresh_enough(getattr(event.message, "date", self.startup_time)):
-                        return
-
-                    if self._dedup_and_remember(int(event.chat_id), event.message):
-                        return
-
-                    formatted = parse_signal(text, event.chat_id, skip_rr_for)
-                    if not formatted:
-                        return
-
-                    for dest in self.to_channels:
-                        try:
-                            await self.client.send_message(dest, formatted)
-                            log.info(f"SENT to {dest}")
-                        except (ChatWriteForbiddenError, ChatAdminRequiredError) as e:
-                            log.error(f"Send failed to {dest} (permissions): {e}")
-                        except Exception as e:
-                            log.warning(f"Send failed to {dest} (will attempt copy): {e}")
-                            try:
-                                if event.message.media:
-                                    await self.client.send_file(
-                                        dest,
-                                        event.message.media,
-                                        caption=formatted,
-                                        force_document=False,
-                                        allow_cache=False,
-                                    )
-                                else:
-                                    await self.client.send_message(dest, formatted)
-                                log.info(f"COPIED to {dest}")
-                            except Exception as copy_err:
-                                log.error(f"Copy failed to {dest}: {copy_err}")
-
-                    if self._callback:
-                        try:
-                            self._callback({"source_chat_id": str(event.chat_id), "text": formatted})
-                        except Exception:
-                            pass
-                except Exception as e:
-                    log.error(f"Handler error: {e}")
-
-            log.info("Starting Telegram client...")
+        while True:
             try:
-                self.client.start()
-
-                async def _verify():
-                    for c in self.from_channels:
-                        try:
-                            ent = await self.client.get_entity(c)
-                            title = getattr(ent, "title", str(ent))
-                            cid = getattr(ent, "id", c)
-                            log.info(f"Listening source: {title} (id={cid})")
-                        except ChannelPrivateError:
-                            log.error(
-                                f"Cannot access source '{c}': ChannelPrivateError (not a participant or channel is private)."
-                            )
-                        except Exception as e:
-                            log.error(f"Cannot access source '{c}': {e}")
-                    for dest in self.to_channels:
-                        try:
-                            ent = await self.client.get_entity(dest)
-                            title = getattr(ent, "title", str(ent))
-                            cid = getattr(ent, "id", dest)
-                            log.info(f"Destination: {title} (id={cid})")
-                        except Exception as e:
-                            log.error(f"Cannot access destination '{dest}': {e}")
-
-                self.client.loop.run_until_complete(_verify())
-
-                log.info("Client started. Waiting for messages...")
-                while self._running:
-                    try:
-                        self.client.run_until_disconnected()
-                    except (ConnectionError, asyncio.TimeoutError):
-                        async def _reconnect():
-                            retries = 0
-                            while retries < 3 and self._running:
-                                try:
-                                    await self.client.connect()
-                                    return True
-                                except (ConnectionError, asyncio.TimeoutError):
-                                    retries += 1
-                                    if retries >= 3:
-                                        return False
-                                    await asyncio.sleep(self.retry_delay)
-
-                        if not self.client.loop.run_until_complete(_reconnect()):
-                            log.error("Reconnection attempts failed. Will retry.")
-                            break
-                        else:
-                            log.warning(
-                                "Network disconnect detected. Reconnected successfully."
-                            )
-                            continue
-                    else:
-                        log.info("Stop requested. Exiting run loop.")
-                        break
-                        
+                asyncio.run(self._run())
+            except KeyboardInterrupt:
+                log.info("Interrupted by user.")
+                break
             except Exception as e:
-                log.error(f"Client error: {e}")
-            finally:
-                if self.client:
-                    try:
-                        # Only disconnect here if stop() hasn't already done so via
-                        # asyncio.run_coroutine_threadsafe.
-                        if (
-                            self._running
-                            and self.client.loop.run_until_complete(self.client.is_connected())
-                        ):
-                            self.client.loop.run_until_complete(self.client.disconnect())
-                    except Exception:
-                        pass
-                loop.close()
-
-            if not self._running:
-                break
-
-            attempts += 1
-            if self.max_retries and attempts >= self.max_retries:
-                log.error("Max retries reached. Stopping bot.")
-                self._running = False
-                break
-
-            log.info(f"Reconnecting in {self.retry_delay} seconds...")
-            time.sleep(self.retry_delay)
-
-        self._running = False
-
-
-# ------------------------------------------------------------------------------
-# Standalone run (optional)
-# ------------------------------------------------------------------------------
-if __name__ == "__main__":
-    import json
-    api_id = int(os.environ["API_ID"])
-    api_hash = os.environ["API_HASH"]
-    session_string = os.environ.get("SESSION_STRING", "")
-    sources_env = os.environ.get("SOURCES", "[-1001467736193]")
-    dest_env = os.environ.get("DESTS", "[\"sjkalalsk\"]")
-
-    try:
-        from_channels = json.loads(sources_env)
-    except Exception:
-        from_channels = []
-    try:
-        to_channels = json.loads(dest_env)
-    except Exception:
-        to_channels = []
-
-    skip_rr_for: set[int] = {1286609636}  # کانال سوم بدون R/R
-
-    bot = SignalBot(
-        api_id,
-        api_hash,
-        session_string,
-        from_channels,
-        to_channels,
-        skip_rr_for,
-    )
-    bot.start()
+                log.exception(f"Fatal in main loop; restarting in 5s: {e}")
+                time.sleep(5)
