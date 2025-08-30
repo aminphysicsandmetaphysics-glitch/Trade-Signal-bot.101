@@ -143,10 +143,10 @@ def start_bot():
     bot_instance = SignalBot(
         api_id=int(cfg.get("api_id")),
         api_hash=cfg.get("api_hash"),
-        session_string=cfg.get("session_string") or "",
-        from_channels=from_channels,
-        to_channels=to_channels,
-        skip_rr_chat_ids=skip_rr,
+        string_session=cfg.get("session_string") or "",
+        sources=from_channels,
+        sink=to_channels,
+        skip_rr_for=skip_rr,
     )
     t = Thread(target=bot_instance.start, daemon=True)
     t.start()
