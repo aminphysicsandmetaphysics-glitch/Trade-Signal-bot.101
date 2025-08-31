@@ -811,18 +811,24 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
         log.info("IGNORED (no symbol)")
         return None
 
-    position = guess_position(" ".join(lines)) or ""
-    if not position:
-        return None, "no position"
-
     # Entry range like '@1900-1910' or '1900-1910'
-    m = None
-    for l in lines:
-        m = UK_RANGE_RE.search(l)
-        if m:
-            break
+    m = UK_RANGE_RE.search(text)
     if not m:
         return None, "no entry range"
+
+    # Determine direction by inspecting a 120 character window around the match
+    start = max(0, m.start() - 120)
+    end = min(len(text), m.end() + 120)
+    window = text[start:end]
+    position = ""
+    if BUY_SYNONYMS.search(window):
+        position = "Buy"
+    elif SELL_SYNONYMS.search(window):
+        position = "Sell"
+    else:
+        position = guess_position(text) or ""
+    if not position:
+        return None, "no position"
     p1, p2 = float(m.group(1)), float(m.group(2))
     lo, hi = (p1, p2) if p1 <= p2 else (p2, p1)
 

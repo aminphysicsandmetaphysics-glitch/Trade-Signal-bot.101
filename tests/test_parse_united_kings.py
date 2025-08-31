@@ -157,3 +157,13 @@ def test_united_kings_fallback_to_classic():
     chat_id = next(iter(signal_bot.UNITED_KINGS_CHAT_IDS))
     result = parse_signal(message, chat_id, {})
     assert result and "Position: Buy" in result
+
+
+def test_united_kings_direction_window_priority():
+    filler = "x" * 130
+    message = (
+        f"#XAUUSD\nSell {filler}\nBuy\n@1900-1910\nTP1 : 1915\nSL : 1890\n"
+    )
+    result, reason = parse_signal_united_kings(message, 1234)
+    assert result and "Position: Buy" in result
+    assert reason is None
