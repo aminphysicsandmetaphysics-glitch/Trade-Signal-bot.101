@@ -814,7 +814,6 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
     position = guess_position(" ".join(lines)) or ""
     if not position:
         return None, "no position"
-    position = f"{position} Limit"
 
     # Entry range like '@1900-1910' or '1900-1910'
     m = None
