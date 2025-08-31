@@ -135,11 +135,17 @@ def start_bot():
         return redirect(url_for("index"))
 
     # Parse sources and destinations
+    try:
+        api_id_int = int(cfg.get("api_id"))
+    except (TypeError, ValueError):
+        flash("API ID must be an integer.", "error")
+        return render_template("index.html", cfg=cfg), 400
+
     from_channels = parse_from_channels(cfg.get("from_channels"))
     to_channels = parse_to_channels(cfg.get("to_channels"))
 
     bot_instance = SignalBot(
-        api_id=int(cfg.get("api_id")),
+        api_id=api_id_int,
         api_hash=cfg.get("api_hash"),
         session_string=cfg.get("session_string") or "",
         from_channels=from_channels,
