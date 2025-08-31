@@ -106,6 +106,9 @@ NON_SIGNAL_HINTS = [
     "friday",
 ]
 
+# Lines that are purely visual dividers ("----", "====", etc.)
+DIVIDER_RE = re.compile(r"^[-_=*~\u2013\u2014\s]{3,}$")
+
 TP_KEYS = ["tp", "take profit", "take-profit", "t/p", "t p"]
 SL_KEYS = ["sl", "stop loss", "stop-loss", "s/l", "s l"]
 ENTRY_KEYS = ["entry price", "entry", "e:"]
@@ -359,6 +362,27 @@ def looks_like_update(text: str) -> bool:
 def looks_like_noise_or_update(text: str) -> bool:
     """Backward compatible wrapper for ``looks_like_update``."""
     return looks_like_update(text)
+
+
+def _strip_noise_lines(text: str) -> str:
+    """Remove divider and boilerplate lines from *text*.
+
+    Lines containing known ``NON_SIGNAL_HINTS`` or consisting solely of divider
+    characters are stripped.  Remaining lines are joined with newlines and
+    returned.
+    """
+
+    cleaned: List[str] = []
+    for raw in (text or "").splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        if DIVIDER_RE.fullmatch(raw):
+            continue
+        if any(h in raw.lower() for h in NON_SIGNAL_HINTS):
+            continue
+        cleaned.append(raw)
+    return "\n".join(cleaned)
 
 
 def is_valid(signal: Dict) -> bool:
@@ -627,6 +651,10 @@ def parse_signal(
 ) -> Optional[str]:
     profile = profile or {}
     text = normalize_numbers(text)
+    text = _strip_noise_lines(text)
+    if not text:
+        log.info("IGNORED (empty)")
+        return None
     # Special-case: United Kings parser
     if chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text):
         try:
