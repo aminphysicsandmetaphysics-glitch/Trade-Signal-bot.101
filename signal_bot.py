@@ -93,9 +93,10 @@ UNITED_KINGS_CHAT_IDS = {
 # United Kings specific regex patterns
 UK_BUY_RE = re.compile(r"\b(?:buy|long)\b", re.IGNORECASE)
 UK_SELL_RE = re.compile(r"\b(?:sell|short)\b", re.IGNORECASE)
-# Entry is provided as a range after '@' separated by a dash (various unicode dashes)
+# Entry is provided as a range separated by a dash, typically after '@' or position
 UK_ENTRY_RANGE_RE = re.compile(
-    r"@\s*(-?\d+(?:\.\d+)?)\s*[-\u2010-\u2015]\s*(-?\d+(?:\.\d+)?)"
+    r"(?:@|\b(?:buy|sell)\b\s*@?)\s*(-?\d+(?:\.\d+)?)\s*[-\u2010-\u2015]\s*(-?\d+(?:\.\d+)?)",
+    re.IGNORECASE,
 )
 UK_SL_RE = re.compile(r"\bS\s*L\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
 UK_TP_RE = re.compile(r"\bT\s*P\s*\d*\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
@@ -352,10 +353,17 @@ def _looks_like_united_kings(text: str) -> bool:
     joined = " ".join(lines)
     if re.search(r"united\s+kings", joined, re.IGNORECASE):
         return True
-    return (
-        UK_ENTRY_RANGE_RE.search(joined)
-        and UK_SL_RE.search(joined)
-        and UK_TP_RE.search(joined)
+
+    has_range = False
+    for l in lines:
+        if UK_TP_RE.search(l) or UK_SL_RE.search(l):
+            continue
+        if UK_ENTRY_RANGE_RE.search(l):
+            has_range = True
+            break
+
+    return has_range and any(UK_SL_RE.search(l) for l in lines) and any(
+        UK_TP_RE.search(l) for l in lines
     )
 
 
@@ -378,9 +386,12 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     elif any(UK_SELL_RE.search(l) for l in lines):
         position = "Sell"
 
-    # Entry range like '@1900-1910'
+    # Entry range like '@1900-1910' or 'Sell 1900-1910'
     m = None
     for l in lines:
+        # Avoid picking up ranges from TP/SL lines or other noise
+        if UK_TP_RE.search(l) or UK_SL_RE.search(l):
+            continue
         m = UK_ENTRY_RANGE_RE.search(l)
         if m:
             break
@@ -522,7 +533,11 @@ def parse_signal(text: str, chat_id: int, profile: Dict[str, Any]) -> Optional[s
     profile = profile or {}
     text = normalize_numbers(text)
     # Special-case: United Kings parser
-    if chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text):
+    if (
+        chat_id in UNITED_KINGS_CHAT_IDS
+        or profile.get("parser") == "united_kings"
+        or _looks_like_united_kings(text)
+    ):
         try:
             res = parse_signal_united_kings(text, chat_id)
             if res is not None:
