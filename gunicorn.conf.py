@@ -34,3 +34,6 @@ errorlog = "-"
 # Do not preload the app.  Preloading would cause the Telethon event loop
 # to be created in the parent process instead of the worker.
 preload_app = False
+
+# Forward stdout/stderr to Gunicorn logging
+capture_output = True

@@ -31,8 +31,8 @@ from telethon.sessions import StringSession
 # ----------------------------------------------------------------------------
 # Logging
 # ----------------------------------------------------------------------------
-logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
-log = logging.getLogger("signal-bot")
+log = logging.getLogger("signal_bot")
+log.setLevel(logging.INFO)
 
 # ----------------------------------------------------------------------------
 # Signal parsing (REPLACED / IMPROVED)
