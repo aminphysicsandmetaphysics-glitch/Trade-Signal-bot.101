@@ -366,11 +366,13 @@ def start_bot():
 @app.route("/stop_bot", methods=["POST"])
 def stop_bot():
     global bot_instance
-    if bot_instance and bot_instance.is_running():
+    if not bot_instance or not bot_instance.is_running():
+        flash("Bot is not running.", "warning")
+    elif not getattr(bot_instance, "loop", None) or not bot_instance.loop.is_running():
+        flash("Bot loop is not running.", "warning")
+    else:
         asyncio.run_coroutine_threadsafe(bot_instance.stop(), bot_instance.loop)
         flash("Bot stopped.", "success")
-    else:
-        flash("Bot is not running.", "warning")
     return redirect(url_for("index"))
 
 
