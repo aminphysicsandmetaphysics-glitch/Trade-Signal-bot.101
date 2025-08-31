@@ -785,7 +785,15 @@ def _validate_tp_sl(
     return True
 
 
-def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], Optional[str]]:
+def parse_signal_united_kings(
+    text: str,
+    chat_id: int,
+    *,
+    return_meta: bool = False,
+) -> Union[
+    Tuple[Optional[str], Optional[str]],
+    Tuple[Optional[str], Optional[str], Optional[Dict[str, Any]]],
+]:
     """Parse a United Kings style signal.
 
     Parameters
@@ -794,6 +802,9 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
         Raw message body from the source channel.
     chat_id : int
         Numeric identifier of the channel the message originated from.
+    return_meta : bool, optional
+        When True, also return the parsed ``signal`` dictionary as a third
+        element.
 
     Notes
     -----
@@ -805,26 +816,32 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
 
     Returns
     -------
-    Tuple[Optional[str], Optional[str]]
-        A pair of ``(result, reason)`` where ``result`` is the formatted
+    Tuple
+        Normally ``(result, reason)`` where ``result`` is the formatted
         signal string or ``None`` if the message is ignored and ``reason``
-        contains the ignore cause.
+        contains the ignore cause.  When ``return_meta`` is True, a third
+        element containing the raw ``signal`` dictionary is included.
     """
+    def _ret(res: Optional[str], reason: Optional[str] = None, meta=None):
+        if return_meta:
+            return res, reason, meta
+        return res, reason
+
     if looks_like_update(text):
-        return None, "update/noise"
+        return _ret(None, "update/noise")
 
     lines = _clean_uk_lines(text)
     if not lines:
-        return None, "empty"
+        return _ret(None, "empty")
     symbol = normalize_symbol("XAUUSD")
     if not symbol:
         log.info("IGNORED (no symbol)")
-        return None
+        return _ret(None)
 
     # Entry range like '@1900-1910' or '1900-1910'
     m = UK_RANGE_RE.search(text)
     if not m:
-        return None, "no entry range"
+        return _ret(None, "no entry range")
 
     # Determine direction by inspecting a 120 character window around the match
     start = max(0, m.start() - 120)
@@ -838,7 +855,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
     else:
         position = guess_position(text) or ""
     if not position:
-        return None, "no position"
+        return _ret(None, "no position")
     p1, p2 = float(m.group(1)), float(m.group(2))
     lo, hi = (p1, p2) if p1 <= p2 else (p2, p1)
 
@@ -862,7 +879,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
             sl = sm.group(1)
             break
     if not sl:
-        return None, "no SL"
+        return _ret(None, "no SL")
 
     # TPs
     tps: List[str] = []
@@ -873,7 +890,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
     seen = set()
     tps = [x for x in tps if not (x in seen or seen.add(x))]
     if not tps:
-        return None, "no TP"
+        return _ret(None, "no TP")
 
     rr = extract_rr(text)
     if not rr:
@@ -894,13 +911,13 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
     }
 
     if not is_valid(signal):
-        return None, "invalid"
+        return _ret(None, "invalid")
     if not validate_directional_consistency(signal):
-        return None, "invalid"
+        return _ret(None, "invalid")
     if not _validate_tp_sl(position, calc_entry, sl, tps, tuple(entry_range)):
-        return None, "invalid"
+        return _ret(None, "invalid")
 
-    return to_unified(signal, chat_id, extra), None
+    return _ret(to_unified(signal, chat_id, extra), None, signal)
 
 
 def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
@@ -1049,18 +1066,29 @@ def parse_signal(
     is_united_kings = chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text)
     if is_united_kings:
         try:
-            res, reason = parse_signal_united_kings(text, chat_id)
-            if res is not None:
-                return res
+            if return_meta:
+                res, reason, meta = parse_signal_united_kings(
+                    text, chat_id, return_meta=True
+                )
+                if res is not None:
+                    return res, meta
+            else:
+                res, reason = parse_signal_united_kings(text, chat_id)
+                if res is not None:
+                    return res
             if reason in {"no entry range", "no position"}:
-                return parse_signal_classic(text, chat_id, profile=profile, return_meta=return_meta)
+                return parse_signal_classic(
+                    text, chat_id, profile=profile, return_meta=return_meta
+                )
             else:
                 if reason:
                     log.info(f"IGNORED ({reason})")
                 return None
         except Exception as e:
             log.debug(f"United Kings parser failed: {e}")
-            return parse_signal_classic(text, chat_id, profile=profile, return_meta=return_meta)
+            return parse_signal_classic(
+                text, chat_id, profile=profile, return_meta=return_meta
+            )
 
     return parse_signal_classic(text, chat_id, profile=profile, return_meta=return_meta)
 
