@@ -179,9 +179,6 @@ UK_NOISE_LINES = [
     re.compile(r"result", re.IGNORECASE),
 ]
 
-# Entry range detector used to spot patterns like '@1234-1250'
-ENTRY_RANGE_RE = re.compile(r"@\s*\d+(?:\.\d+)?\s*[-–]\s*\d+(?:\.\d+)?")
-
 # Mapping of chat IDs to profile options controlling parsing behaviour.
 # Example: {1234: {"allow_entry_range": True, "show_entry_range_only": True}}
 CHANNEL_PROFILES: Dict[int, Dict[str, Any]] = {}
@@ -433,9 +430,11 @@ def is_valid(signal: Dict) -> bool:
     ]) and len(signal.get("tps", [])) >= 1
 
 
-def _has_entry_range(text: str) -> bool:
-    """Return True if ``text`` contains an entry range like ``@1234-1250``."""
-    return bool(ENTRY_RANGE_RE.search(text))
+def _has_entry_range(t: str) -> bool:
+    """Return True if ``t`` contains an entry range like ``@1234-1250``."""
+    return bool(
+        re.search(r"@\s*\d+(?:\.\d+)?\s*[-–]\s*\d+(?:\.\d+)?", t)
+    )
 
 
 def to_unified(signal: Dict, chat_id: int, extra: Optional[Dict] = None) -> str:
@@ -558,7 +557,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
         s = f"{x:.5f}".rstrip("0").rstrip(".")
         return s
 
-    entry = _fmt(lo)
+    entry = _fmt((lo + hi) / 2)
     entry_range = [_fmt(lo), _fmt(hi)]
 
     # SL
@@ -711,7 +710,9 @@ def parse_signal(
         return None
 
     if _has_entry_range(text):
-        if profile.get("allow_entry_range"):
+        if (chat_id in UNITED_KINGS_CHAT_IDS) or _looks_like_united_kings(text):
+            pass
+        elif profile.get("allow_entry_range"):
             try:
                 res = parse_channel_four(text, chat_id)
                 if res is not None:
