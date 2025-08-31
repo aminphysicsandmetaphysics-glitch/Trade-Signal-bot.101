@@ -10,6 +10,7 @@ This repository contains a Telegram signal‑forwarding bot designed to run 24/7
 * Web dashboard for configuring API credentials, source/destination channels and for starting/stopping the bot.
 * Automatic reconnection to Telegram if the client disconnects.
 * Automatically computes and displays risk/reward (R/R) ratio when possible.
+* Per-channel message formatting using Jinja2 templates.
 
 ## Repository Layout
 
@@ -52,6 +53,18 @@ README.md            # This file
    ```
 
 4. Open http://127.0.0.1:5000 in your browser and fill in your API ID, API hash, session string, source channels and destination channels. Click **Start Bot** to begin forwarding.
+
+## Templates
+
+Place custom Jinja2 templates in the `templates/` directory and assign them to
+source channels when editing a profile. Each message will be rendered through
+the selected template before being sent to destinations. Sample templates:
+
+* `templates/vip.j2` – prefixes messages with `[VIP]`.
+* `templates/free.j2` – appends a small footer.
+
+Leave the template field blank to send the parsed message without additional
+formatting.
 
 ## Authentication
 

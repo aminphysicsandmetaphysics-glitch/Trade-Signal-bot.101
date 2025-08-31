@@ -10,6 +10,7 @@
   <textarea name="to_channels" placeholder='[@dest1, @dest2]'>{{ profile.to_channels|join(', ') if profile else '' }}</textarea>
   <label>گزینه‌های پارس</label>
   <input name="parse_options" value="{{ profile.parse_options if profile else '' }}">
+  <div id="templateFields"></div>
   <div class="btns">
     <button class="primary" type="submit">ذخیره</button>
   </div>
@@ -26,11 +27,38 @@
 const form = document.getElementById('profileForm');
 const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 if(form){
+  const templatesInit = {{ profile.templates|tojson if profile else '{}' }};
+  const fromField = form.querySelector('textarea[name="from_channels"]');
+  const tmplContainer = document.getElementById('templateFields');
+
+  function renderTemplateInputs(channels){
+    tmplContainer.innerHTML = '';
+    channels.forEach(ch => {
+      const label = document.createElement('label');
+      label.textContent = `قالب برای ${ch}`;
+      const input = document.createElement('input');
+      input.name = `template_${ch}`;
+      input.value = templatesInit[ch] || '';
+      tmplContainer.appendChild(label);
+      tmplContainer.appendChild(input);
+    });
+  }
+
+  const parseChannels = () => fromField.value.split(/[,\s]+/).filter(Boolean);
+  renderTemplateInputs(parseChannels());
+  fromField.addEventListener('input', () => renderTemplateInputs(parseChannels()));
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(form).entries());
     data.from_channels = data.from_channels ? data.from_channels.split(/[,\s]+/).filter(Boolean) : [];
     data.to_channels = data.to_channels ? data.to_channels.split(/[,\s]+/).filter(Boolean) : [];
+    const templates = {};
+    data.from_channels.forEach(ch => {
+      const val = form.querySelector(`[name="template_${ch}"]`)?.value;
+      if(val){ templates[ch] = val; }
+    });
+    data.templates = templates;
     const method = "{{ 'PUT' if profile else 'POST' }}";
     const url = "{{ url_for('api_profile', name=profile.name) if profile else url_for('api_profiles') }}";
     const res = await fetch(url, {

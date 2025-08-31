@@ -8,7 +8,7 @@ def test_profile_crud(tmp_path):
         name="Profile 1",
         parse_options={"lang": "en"},
         member_channels=["channel_a", "channel_b"],
-        templates={"welcome": "hello"},
+        templates={"channel_a": "vip.j2"},
         destinations=["dest_a"]
     )
 
