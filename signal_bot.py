@@ -558,6 +558,48 @@ def is_valid(signal: Dict) -> bool:
     ]) and len(signal.get("tps", [])) >= 1
 
 
+def validate_directional_consistency(signal: Dict) -> bool:
+    """Check that TP and SL are on the correct side of entry.
+
+    For ``BUY`` signals every take-profit target must be strictly above the
+    entry price while the stop loss must be below it.  ``SELL`` signals require
+    the opposite relationship.  If values cannot be parsed as floats the
+    function defaults to ``True`` leaving validation to other layers.
+    """
+
+    try:
+        entry = float(signal.get("entry"))
+        sl = float(signal.get("sl"))
+        tps = [float(tp) for tp in signal.get("tps", [])]
+    except Exception:
+        return True
+
+    pos = (signal.get("position") or "").upper()
+    if pos.startswith("BUY"):
+        if sl >= entry:
+            log.info(
+                f"IGNORED (buy but SL {signal['sl']} >= entry {signal['entry']})"
+            )
+            return False
+        if any(tp <= entry for tp in tps):
+            log.info(
+                f"IGNORED (buy but TP {tps[0]} <= entry {signal['entry']})"
+            )
+            return False
+    elif pos.startswith("SELL"):
+        if sl <= entry:
+            log.info(
+                f"IGNORED (sell but SL {signal['sl']} <= entry {signal['entry']})"
+            )
+            return False
+        if any(tp >= entry for tp in tps):
+            log.info(
+                f"IGNORED (sell but TP {tps[0]} >= entry {signal['entry']})"
+            )
+            return False
+    return True
+
+
 def _has_entry_range(text: str) -> bool:
     """Return True if ``text`` contains an entry range like ``@1234-1250``."""
     return bool(ENTRY_RANGE_RE.search(text))
@@ -819,6 +861,8 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     if not is_valid(signal):
         log.info(f"IGNORED (invalid) -> {signal}")
         return None
+    if not validate_directional_consistency(signal):
+        return None
     if not _validate_tp_sl(position, entry, sl, tps, tuple(entry_range)):
         return None
 
@@ -870,6 +914,8 @@ def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
 
     if not is_valid(signal):
         log.info(f"IGNORED (invalid) -> {signal}")
+        return None
+    if not validate_directional_consistency(signal):
         return None
     if not _validate_tp_sl(position, entry, sl, tps, entry_range):
         return None
@@ -939,7 +985,7 @@ def parse_signal(
         log.info(f"IGNORED (invalid) -> {signal}")
         return None
 
-    if not _validate_tp_sl(position, entry, sl, tps):
+    if not validate_directional_consistency(signal):
         return None
 
     return to_unified(signal, chat_id, signal.get("extra", {}))
