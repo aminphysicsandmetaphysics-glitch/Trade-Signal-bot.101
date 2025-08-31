@@ -95,6 +95,7 @@ ALIAS_MAP = {
     "XAU": "XAUUSD",
     "SILVER": "XAGUSD",
     "WTI": "USOIL",
+    "OIL": "USOIL",
     "USOIL": "USOIL",
     "UKOIL": "UKOIL",
     "BRENT": "UKOIL",
