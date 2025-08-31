@@ -1,3 +1,4 @@
+import logging
 import pytest
 import signal_bot
 from signal_bot import parse_signal, parse_signal_united_kings
@@ -31,6 +32,8 @@ INVALID_SIGNALS = [
     """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1895\nTP2 : 1915\nSL : 1890\n""",
     # Range with TP above midpoint for sell
     """#XAUUSD\nSell\n@1900-1910\nTP1 : 1912\nTP2 : 1890\nSL : 1915\n""",
+    # Missing position
+    """#XAUUSD\n@1900-1910\nTP1 : 1915\nSL : 1890\n""",
 ]
 
 NOISE_MESSAGES = [
@@ -68,3 +71,10 @@ def test_united_kings_entry_range_assignment(monkeypatch):
 
     assert captured["signal"]["entry"] == "1900"
     assert captured["extra"]["entries"]["range"] == ["1900", "1910"]
+
+
+def test_united_kings_missing_position_logged(caplog):
+    message = """#XAUUSD\n@1900-1910\nTP1 : 1915\nSL : 1890\n"""
+    with caplog.at_level(logging.INFO):
+        assert parse_signal_united_kings(message, 1234) is None
+    assert "no position" in caplog.text.lower()

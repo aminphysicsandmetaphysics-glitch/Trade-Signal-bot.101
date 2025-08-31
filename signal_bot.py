@@ -574,6 +574,10 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     elif any(UK_SELL_RE.search(l) for l in lines):
         position = "Sell"
 
+    if not position:
+        log.info("IGNORED (no position)")
+        return None
+
     # Entry range like '@1900-1910' or '1900-1910'
     m = None
     for l in lines:
