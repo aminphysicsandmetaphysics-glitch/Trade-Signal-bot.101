@@ -10,12 +10,12 @@ VALID_SIGNALS = [
 📊 #XAUUSD\n📉 Position: Buy\n❗️ R/R : 1/3\n💲 Entry Price : 1932\n✔️ TP1 : 1935\n✔️ TP2 : 1940\n🚫 Stop Loss : 1925""",
     ),
     (
-        """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1915\nTP2 : 1920\nSL : 1890\n""",
+        """#XAUUSD\nBuy gold\n@1900-1910\nTP1 : 1915\nTP2 : 1920\nSL : 1890\n""",
         """\
 📊 #XAUUSD\n📉 Position: Buy\n❗️ R/R : 1/1.5\n💲 Entry Price : 1900\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1915\n✔️ TP2 : 1920\n🚫 Stop Loss : 1890""",
     ),
     (
-        """#XAUUSD\nSell\n@1900-1910\nTP1 : 1890\nTP2 : 1880\nSL : 1910\n""",
+        """#XAUUSD\nSell gold\n@1900-1910\nTP1 : 1890\nTP2 : 1880\nSL : 1910\n""",
         """\
 📊 #XAUUSD\n📉 Position: Sell\n❗️ R/R : 1/1\n💲 Entry Price : 1900\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1890\n✔️ TP2 : 1880\n🚫 Stop Loss : 1910""",
     ),

@@ -179,6 +179,13 @@ UK_NOISE_LINES = [
     re.compile(r"result", re.IGNORECASE),
 ]
 
+UK_GOLD_RE = re.compile(r"\bgold\b", re.IGNORECASE)
+UK_PRICE_RE = re.compile(r"@\s*-?\d+(?:\.\d+)?")
+UK_ACTION_RE = re.compile(
+    r"(?:\b(?:buy|sell|grab|purchase|unload)\b|we(?:'|’)?re\s+(?:buying|selling))",
+    re.IGNORECASE,
+)
+
 # Entry range detector used to spot patterns like '@1234-1250'
 ENTRY_RANGE_RE = re.compile(r"@\s*\d+(?:\.\d+)?\s*[-–]\s*\d+(?:\.\d+)?")
 
@@ -511,18 +518,23 @@ def _clean_uk_lines(text: str) -> List[str]:
 
 
 def _looks_like_united_kings(text: str) -> bool:
-    """Heuristic check for United Kings style messages."""
-    lines = _clean_uk_lines(text)
-    if not lines:
+    """Heuristic check for United Kings style messages.
+
+    A message is considered United Kings style when it mentions gold,
+    includes either an ``@price`` or a ``lo–hi`` range and contains an
+    action verb such as Buy, Sell, Grab, Purchase or Unload.  Phrases like
+    ``we're buying`` or ``we're selling`` are also recognised.
+    """
+
+    if not text:
         return False
-    joined = " ".join(lines)
-    if re.search(r"united\s+kings", joined, re.IGNORECASE):
-        return True
-    has_range = any(UK_RANGE_RE.search(l) and "entry" not in l.lower() for l in lines)
-    has_sl = any(UK_SL_RE.search(l) for l in lines)
-    has_tp = any(UK_TP_RE.search(l) for l in lines)
-    has_pos = any(UK_BUY_RE.search(l) or UK_SELL_RE.search(l) for l in lines)
-    return has_range and has_sl and has_tp and has_pos
+    if not UK_GOLD_RE.search(text):
+        return False
+    if not (UK_PRICE_RE.search(text) or UK_RANGE_RE.search(text)):
+        return False
+    if not UK_ACTION_RE.search(text):
+        return False
+    return True
 
 
 def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
