@@ -165,9 +165,9 @@ UNITED_KINGS_CHAT_IDS = {
 # United Kings specific regex patterns
 UK_BUY_RE = re.compile(r"\b(?:buy|long)\b", re.IGNORECASE)
 UK_SELL_RE = re.compile(r"\b(?:sell|short)\b", re.IGNORECASE)
-# Entry is provided as a range separated by a dash ("@" optional, various unicode dashes)
+# Entry is provided as a range separated by a dash and must include an "@" prefix
 UK_RANGE_RE = re.compile(
-    r"@?\s*(-?\d+(?:\.\d+)?)\s*[-\u2010-\u2015]\s*(-?\d+(?:\.\d+)?)"
+    r"@\s*(-?\d+(?:\.\d+)?)\s*[-\u2010-\u2015]\s*(-?\d+(?:\.\d+)?)"
 )
 UK_SL_RE = re.compile(r"\bS\s*L\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
 UK_TP_RE = re.compile(r"\bT\s*P\s*\d*\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
@@ -569,7 +569,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     elif any(UK_SELL_RE.search(l) for l in lines):
         position = "Sell"
 
-    # Entry range like '@1900-1910' or '1900-1910'
+    # Entry range like '@1900-1910'
     m = None
     for l in lines:
         m = UK_RANGE_RE.search(l)
@@ -585,12 +585,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
         s = f"{x:.5f}".rstrip("0").rstrip(".")
         return s
 
-    range_str = m.group(0)
-    if "@" in range_str:
-        entry = _fmt(lo)
-    else:
-        mid = (lo + hi) / 2
-        entry = _fmt(mid)
+    entry = _fmt(lo)
     entry_range = [_fmt(lo), _fmt(hi)]
 
     # SL
