@@ -128,15 +128,19 @@ def normalize_numbers(text: str) -> str:
         return ""
 
     # Map Eastern Arabic and Persian digits to Western Arabic numerals
-    trans = {ord(c): str(i) for i, c in enumerate("٠١٢٣٤٥٦٧٨٩")}
-    trans.update({ord(c): str(i) for i, c in enumerate("۰۱۲۳۴۵۶۷۸۹")})
+    digit_map = {ord(c): str(i) for i, c in enumerate("٠١٢٣٤٥٦٧٨٩")}
+    digit_map.update({ord(c): str(i) for i, c in enumerate("۰۱۲۳۴۵۶۷۸۹")})
 
-    # Normalize decimal and thousands separators
-    trans[ord("٫")] = "."  # Arabic decimal separator
-    trans[ord("٬")] = ""  # Arabic thousands separator (remove)
-    trans[ord(",")] = ""  # Comma thousands separator (remove)
+    # Separate mappings for thousands and decimal separators
+    thousands_map = {ord("٬"): None, ord(","): None}
+    decimal_map = {ord("٫"): "."}
 
-    return text.translate(trans)
+    # Apply mappings: strip thousands separators before decimals
+    text = text.translate(digit_map)
+    text = text.translate(thousands_map)
+    text = text.translate(decimal_map)
+
+    return text
 
 
 def guess_symbol(text: str) -> Optional[str]:
