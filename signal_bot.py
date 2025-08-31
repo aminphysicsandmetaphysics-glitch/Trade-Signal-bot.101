@@ -92,6 +92,7 @@ CURRENCY_CODES = {
 ALIAS_MAP = {
     # Commodities
     "GOLD": "XAUUSD",
+    "XAU": "XAUUSD",
     "SILVER": "XAGUSD",
     "WTI": "USOIL",
     "USOIL": "USOIL",
