@@ -136,6 +136,20 @@ def test_united_kings_sell_synonym_dump():
     assert reason is None
 
 
+def test_united_kings_sell_phrase_were_selling():
+    message = """#XAUUSD\nwe’re selling\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
+    result, reason = parse_signal_united_kings(message, 1234)
+    assert result and "Position: Sell" in result
+    assert reason is None
+
+
+def test_united_kings_sell_synonym_ditch():
+    message = """#XAUUSD\nditch\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
+    result, reason = parse_signal_united_kings(message, 1234)
+    assert result and "Position: Sell" in result
+    assert reason is None
+
+
 def test_united_kings_fallback_to_classic():
     message = (
         "#XAUUSD\nBuy\nEntry Price : 1932\nTP1 : 1935\nTP2 : 1940\nStop Loss : 1925\n"
