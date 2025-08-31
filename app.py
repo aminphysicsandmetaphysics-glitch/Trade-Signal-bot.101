@@ -27,6 +27,8 @@ from flask import (
     current_app,
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
+import secrets
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from signal_bot import SignalBot, parse_signal
 
@@ -46,6 +48,33 @@ admin_user = os.environ.get("ADMIN_USER", "admin")
 admin_pass = os.environ.get("ADMIN_PASS", "admin")
 
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+csrf_serializer = URLSafeTimedSerializer(secret)
+
+
+def generate_csrf_token() -> str:
+    if "_csrf_token" not in session:
+        session["_csrf_token"] = secrets.token_urlsafe()
+    return csrf_serializer.dumps(session["_csrf_token"])
+
+
+@app.before_request
+def csrf_protect():
+    if app.config.get("WTF_CSRF_ENABLED", True) and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        token = request.form.get("csrf_token") or request.headers.get("X-CSRFToken")
+        if not token:
+            return "Missing CSRF token", 400
+        try:
+            token_val = csrf_serializer.loads(token, max_age=3600)
+        except BadSignature:
+            return "Invalid CSRF token", 400
+        if token_val != session.get("_csrf_token"):
+            return "Invalid CSRF token", 400
+
+
+@app.context_processor
+def inject_csrf_token():
+    return {"csrf_token": generate_csrf_token}
 
 
 # ----------------------------------------------------------------------------

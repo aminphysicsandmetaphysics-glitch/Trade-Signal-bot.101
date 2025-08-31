@@ -24,6 +24,7 @@
 
 <script>
 const form = document.getElementById('profileForm');
+const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 if(form){
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -34,7 +35,7 @@ if(form){
     const url = "{{ url_for('api_profile', name=profile.name) if profile else url_for('api_profiles') }}";
     const res = await fetch(url, {
       method: method,
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
       body: JSON.stringify(data)
     });
     if(res.ok){
@@ -55,7 +56,7 @@ if(testBtn){
     const msg = document.getElementById('sampleText').value;
     const res = await fetch("{{ url_for('api_profile_test', name=profile.name if profile else '') }}", {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
       body: JSON.stringify({message: msg})
     });
     const j = await res.json();
