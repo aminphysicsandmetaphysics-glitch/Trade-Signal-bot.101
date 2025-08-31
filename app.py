@@ -364,6 +364,7 @@ def start_bot():
 
 
 @app.route("/stop_bot", methods=["POST"])
+@login_required
 def stop_bot():
     global bot_instance
     if not bot_instance or not bot_instance.is_running():
