@@ -24,7 +24,8 @@ class ChannelProfile:
         name: Human readable name.
         parse_options: Options controlling how messages are parsed.
         member_channels: List of channel identifiers this profile reads from.
-        templates: Mapping of template names to template content.
+        templates: Mapping of source channel identifiers to template file names
+            or raw Jinja2 template strings.
         destinations: List of destinations where parsed messages are sent.
     """
 
@@ -32,7 +33,7 @@ class ChannelProfile:
     name: str
     parse_options: Dict[str, Any]
     member_channels: List[str]
-    templates: Dict[str, Any]
+    templates: Dict[str, str]
     destinations: List[str]
 
 

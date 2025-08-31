@@ -103,6 +103,7 @@ def _profile_to_dict(profile: ChannelProfile) -> dict:
         "from_channels": profile.member_channels,
         "to_channels": profile.destinations,
         "parse_options": profile.parse_options,
+        "templates": profile.templates,
     }
 
 
@@ -290,7 +291,7 @@ def api_profiles():
         member_channels=data.get("from_channels", []),
         destinations=data.get("to_channels", []),
         parse_options=data.get("parse_options", {}),
-        templates={},
+        templates=data.get("templates", {}),
     )
     profiles_store.create_profile(profile)
     _update_channel_profiles(profile)
@@ -319,6 +320,7 @@ def api_profile(name: str):
         "member_channels": data.get("from_channels", profile.member_channels),
         "destinations": data.get("to_channels", profile.destinations),
         "parse_options": data.get("parse_options", profile.parse_options),
+        "templates": data.get("templates", profile.templates),
     }
     updated = profiles_store.update_profile(name, **updates)
     _update_channel_profiles(updated)

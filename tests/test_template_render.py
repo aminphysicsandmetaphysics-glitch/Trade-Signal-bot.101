@@ -17,3 +17,8 @@ def test_render_custom_template_sanitizes_html():
     template = "<script>{{ name }}</script>"
     result = render_template(template, {"name": "Alice"})
     assert result == "&lt;script&gt;Alice&lt;/script&gt;"
+
+
+def test_render_template_file():
+    result = render_template("vip.j2", {"message": "Hi"})
+    assert result.strip() == "[VIP] Hi"
