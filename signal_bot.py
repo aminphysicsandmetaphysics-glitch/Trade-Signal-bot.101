@@ -332,14 +332,6 @@ def normalize_numbers(text: str) -> str:
     return text
 
 
-BIDI_ZW = r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]"
-NBSP = "\u00a0"
-
-
-def strip_invisibles(s: str) -> str:
-    return re.sub(BIDI_ZW, "", s).replace(NBSP, " ")
-
-
 def guess_symbol(text: str) -> Optional[str]:
     m = PAIR_RE.search((text or "").upper())
     if not m:
@@ -1001,31 +993,16 @@ def parse_channel_four(
 
 def parse_gold_exclusive(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Parse messages from the 'Gold Exclusive' channel."""
-    t = strip_invisibles(normalize_numbers(text))
-    symbol = None
-    m = PAIR_RE.search(t.upper())
-    if m:
-        symbol = m.group(1)
-    if not symbol:
-        parts = t.strip().split()
-        if parts:
-            head = parts[0].lstrip("#").upper()
-            if re.fullmatch(r"[A-Z]{3,6}", head):
-                symbol = head
-    if symbol:
-        symbol = normalize_symbol(symbol)
-        base = f"#{symbol}\n{t}"
-    else:
-        base = t
+    text = normalize_numbers(text)
+    base = f"#XAUUSD\n{text}"
     parsed = parse_signal_classic(base, 0, {}, return_meta=True)
     if not parsed:
         return None, "invalid"
     _, meta = parsed
-    meta["symbol"] = normalize_symbol(symbol or meta.get("symbol", ""))
-    tf = extract_tf(t)
+    tf = extract_tf(text)
     if tf:
         meta["tf"] = tf
-    if HIGH_RISK_RE.search(t):
+    if HIGH_RISK_RE.search(text):
         meta["high_risk"] = True
     return meta, None
 
