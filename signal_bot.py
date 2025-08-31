@@ -186,7 +186,12 @@ UK_ACTION_RE = re.compile(
 )
 
 # Entry range detector used to spot patterns like '@1234-1250'
-ENTRY_RANGE_RE = re.compile(r"@\s*\d+(?:\.\d+)?\s*[-–]\s*\d+(?:\.\d+)?")
+# Entry ranges may use various dash-like characters between the numbers.
+# Accept common forms such as hyphen-minus (-), en dash (–), em dash (—)
+# and the unicode minus sign (−).
+ENTRY_RANGE_RE = re.compile(
+    r"@\s*\d+(?:\.\d+)?\s*[-–—−]\s*\d+(?:\.\d+)?"
+)
 
 # Mapping of chat IDs to profile options controlling parsing behaviour.
 # Example: {1234: {"allow_entry_range": True, "show_entry_range_only": True}}
