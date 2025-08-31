@@ -58,6 +58,20 @@ def test_parse_united_kings_valid(message, expected):
     assert parse_signal(message, 1234, {}) == expected
 
 
+def test_parse_united_kings_return_meta():
+    message, expected = VALID_SIGNALS[1]
+    result = parse_signal(message, 1234, return_meta=True)
+    assert result is not None
+    text, meta = result
+    assert text == expected
+    assert meta["symbol"] == "XAUUSD"
+    assert meta["position"] == "Buy"
+    assert meta["entry_range"] == ["1900", "1910"]
+    assert meta["tps"] == ["1915", "1920"]
+    assert meta["sl"] == "1890"
+    assert meta["rr"] == "1/1.5"
+
+
 @pytest.mark.parametrize("message", INVALID_SIGNALS)
 def test_parse_united_kings_invalid(message):
     assert parse_signal(message, 1234, {}) is None
