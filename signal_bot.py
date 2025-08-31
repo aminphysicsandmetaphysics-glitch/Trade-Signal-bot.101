@@ -670,7 +670,15 @@ class SignalBot:
             return True
         if getattr(ev_dt, "tzinfo", None) is None:
             ev_dt = ev_dt.replace(tzinfo=timezone.utc)
-        return ev_dt >= (self.startup_time - self.grace)
+        threshold = self.startup_time - self.grace
+        if ev_dt < threshold:
+            log.debug(
+                "Ignoring stale message from %s (startup window %s)",
+                ev_dt,
+                threshold,
+            )
+            return False
+        return True
 
     # Dedupe logic
     def _dedup_and_remember(self, src_id: int, msg) -> bool:
@@ -688,6 +696,9 @@ class SignalBot:
         if mid is not None:
             key = (int(src_id), int(mid))
             if key in self.id_set:
+                log.debug(
+                    "Discarding duplicate message id %s from %s", mid, src_id
+                )
                 return True
             self.id_set.add(key)
             self.id_window.append((now, key))
@@ -698,6 +709,9 @@ class SignalBot:
 
         fp = _content_fingerprint(msg, src_id)
         if fp in self.fp_set:
+            log.debug(
+                "Discarding duplicate content from %s (fingerprint %s)", src_id, fp
+            )
             return True
         self.fp_set.add(fp)
         self.fp_window.append((now, fp))
