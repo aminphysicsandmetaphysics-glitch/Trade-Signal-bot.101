@@ -50,8 +50,11 @@ from telethon.sessions import StringSession
 # ----------------------------------------------------------------------------
 
 # نمادها/سیمبل‌ها
+# Match optional hashtag followed by either a single token alias or a
+# pair of tokens separated by a space or slash. Delimiters are stripped
+# during normalisation. Newlines are not considered valid delimiters.
 PAIR_RE = re.compile(
-    r"(?:#)?(XAUUSD|XAGUSD|USOIL|[A-Z]{3}/[A-Z]{3}|[A-Z]{6})\b"
+    r"(?:#)?([A-Z]{2,10}(?: */ *[A-Z]{2,10}| [A-Z]{2,10})?)\b"
 )
 
 # Supported currency codes for validating symbol guesses
@@ -84,6 +87,16 @@ CURRENCY_CODES = {
     "SAR",
     "AED",
     "PLN",
+}
+
+# Map common aliases and instrument names to canonical symbols
+ALIAS_MAP = {
+    "GOLD": "XAUUSD",
+    "SILVER": "XAGUSD",
+    "WTI": "USOIL",
+    "USOIL": "USOIL",
+    "UKOIL": "UKOIL",
+    "BTC": "BTCUSDT",
 }
 
 # Known non-FX instruments matched directly
@@ -228,8 +241,9 @@ def guess_symbol(text: str) -> Optional[str]:
     m = PAIR_RE.search((text or "").upper())
     if not m:
         return None
-    sym = m.group(1).upper().lstrip("#").replace(" ", "").replace("/", "")
-    if sym in KNOWN_INSTRUMENTS:
+    sym = m.group(1).upper().replace(" ", "").replace("/", "")
+    sym = ALIAS_MAP.get(sym, sym)
+    if sym in KNOWN_INSTRUMENTS or sym in ALIAS_MAP.values():
         return sym
     if len(sym) == 6:
         base, quote = sym[:3], sym[3:]
