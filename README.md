@@ -11,6 +11,8 @@ This repository contains a Telegram signal‑forwarding bot designed to run 24/7
 * Automatic reconnection to Telegram if the client disconnects.
 * Automatically computes and displays risk/reward (R/R) ratio when possible.
 * Per-channel message formatting using Jinja2 templates.
+* Optional routing overrides to send specific symbol/position combinations to
+  different destination channels.
 
 ## Repository Layout
 
@@ -65,6 +67,13 @@ the selected template before being sent to destinations. Sample templates:
 
 Leave the template field blank to send the parsed message without additional
 formatting.
+
+## Routing Overrides
+
+Profiles may define a ``routes`` mapping of ``"SYMBOL:POSITION"`` keys to
+destination channel lists. When a parsed signal matches one of these keys, the
+bot sends the message to the specified channels instead of the default
+``destinations``.
 
 ## Authentication
 

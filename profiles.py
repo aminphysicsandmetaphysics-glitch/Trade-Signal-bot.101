@@ -27,6 +27,9 @@ class ChannelProfile:
         templates: Mapping of source channel identifiers to template file names
             or raw Jinja2 template strings.
         destinations: List of destinations where parsed messages are sent.
+        routes: Optional mapping of ``"SYMBOL:POSITION"`` keys to destination
+            channel lists.  When provided, these override ``destinations`` for
+        matching signals.
     """
 
     id: str
@@ -35,6 +38,7 @@ class ChannelProfile:
     member_channels: List[str]
     templates: Dict[str, str]
     destinations: List[str]
+    routes: Optional[Dict[str, List[str]]] = None
 
 
 class ProfileStore:
