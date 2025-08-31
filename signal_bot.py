@@ -622,7 +622,7 @@ def _strip_noise_lines(lines: list[str]) -> list[str]:
             continue
         if low.startswith("alright united kings"):
             continue
-        if low.startswith("tyler here"):
+        if low.startswith("tyler here") and "@" not in raw and "sl" not in low and "tp" not in low:
             continue
 
         if "@" not in raw and "sl" not in low and "tp" not in low:
