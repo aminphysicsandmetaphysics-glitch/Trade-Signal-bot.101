@@ -24,7 +24,7 @@ from flask import (
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from signal_bot import SignalBot, _coerce_channel_id
+from signal_bot import SignalBot
 
 
 # ----------------------------------------------------------------------------
@@ -51,7 +51,6 @@ config_store = {
     "session_string": os.environ.get("SESSION_STRING", ""),
     "from_channels": os.environ.get("SOURCES", ""),
     "to_channels": os.environ.get("DESTS", ""),
-    "skip_rr_channels": os.environ.get("SKIP_RR_CHANNELS", ""),
 }
 
 
@@ -106,7 +105,6 @@ def save_config():
     session_string = request.form.get("session_string", "").strip()
     from_channels = request.form.get("from_channels", "").strip()
     to_channels = request.form.get("to_channels", "").strip()
-    skip_rr_channels = request.form.get("skip_rr_channels", "").strip()
 
     config_store.update(
         {
@@ -115,7 +113,6 @@ def save_config():
             "session_string": session_string,
             "from_channels": from_channels,
             "to_channels": to_channels,
-            "skip_rr_channels": skip_rr_channels,
         }
     )
     flash("Saved configuration.", "success")
@@ -140,17 +137,6 @@ def start_bot():
     # Parse sources and destinations
     from_channels = parse_from_channels(cfg.get("from_channels"))
     to_channels = parse_to_channels(cfg.get("to_channels"))
-    # Channels that should not display R/R values
-    raw_skip = _parse_channels(cfg.get("skip_rr_channels"))
-    skip_rr: set[int] = set()
-    for item in raw_skip:
-        try:
-            num = int(str(item).strip())
-            coerced = _coerce_channel_id(num)
-            if isinstance(coerced, int):
-                skip_rr.add(coerced)
-        except Exception:
-            continue
 
     bot_instance = SignalBot(
         api_id=int(cfg.get("api_id")),
@@ -158,7 +144,6 @@ def start_bot():
         session_string=cfg.get("session_string") or "",
         from_channels=from_channels,
         to_channels=to_channels,
-        skip_rr_chat_ids=skip_rr,
     )
     t = Thread(target=bot_instance.start, daemon=True)
     t.start()

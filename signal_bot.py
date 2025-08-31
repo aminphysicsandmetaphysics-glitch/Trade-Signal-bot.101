@@ -214,6 +214,26 @@ def extract_rr(text: str) -> Optional[str]:
     return None
 
 
+def calculate_rr(entry: str, sl: str, tp: str) -> Optional[str]:
+    """Calculate risk/reward ratio from entry, stop loss and first take profit."""
+    try:
+        e, s, t = float(entry), float(sl), float(tp)
+    except Exception:
+        return None
+    risk = abs(e - s)
+    reward = abs(t - e)
+    if risk <= 0 or reward <= 0:
+        return None
+
+    def fmt(x: float) -> str:
+        return f"{x:.2f}".rstrip("0").rstrip(".")
+
+    if risk >= reward:
+        return f"{fmt(risk / reward)}/1"
+    else:
+        return f"1/{fmt(reward / risk)}"
+
+
 def looks_like_update(text: str) -> bool:
     t = (text or "").lower()
     return any(key in t for key in NON_SIGNAL_HINTS)
@@ -228,19 +248,14 @@ def is_valid(signal: Dict) -> bool:
     ]) and len(signal.get("tps", [])) >= 1
 
 
-def to_unified(
-    signal: Dict,
-    chat_id: int,
-    skip_rr_for: Iterable[int] = (),
-    extra: Optional[Dict] = None,
-) -> str:
+def to_unified(signal: Dict, chat_id: int, extra: Optional[Dict] = None) -> str:
     extra = extra if extra is not None else signal.get("extra", {})
 
     parts: List[str] = []
     parts.append(f"📊 #{signal['symbol']}")
     parts.append(f"📉 Position: {signal['position']}")
     rr = signal.get("rr")
-    if rr and chat_id not in set(skip_rr_for):
+    if rr:
         parts.append(f"❗️ R/R : {rr}")
     parts.append(f"💲 Entry Price : {signal['entry']}")
     
@@ -288,9 +303,7 @@ def _looks_like_united_kings(text: str) -> bool:
     )
 
 
-def parse_signal_united_kings(
-    text: str, chat_id: int, skip_rr_for: Iterable[int] = ()
-) -> Optional[str]:
+def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     if looks_like_update(text):
         log.info("IGNORED (update/noise)")
         return None
@@ -352,6 +365,8 @@ def parse_signal_united_kings(
         return None
 
     rr = extract_rr(text)
+    if not rr:
+        rr = calculate_rr(entry, sl, tps[0])
 
     extra = {"entries": {"range": entry_range}}
     signal = {
@@ -381,12 +396,10 @@ def parse_signal_united_kings(
     except Exception:
         pass
 
-    return to_unified(signal, chat_id, skip_rr_for, extra)
+    return to_unified(signal, chat_id, extra)
 
 
-def parse_channel_four(
-    text: str, chat_id: int, skip_rr_for: Iterable[int] = ()
-) -> Optional[str]:
+def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
     """Parser for Channel Four style messages supporting entry ranges."""
     if looks_like_update(text):
         log.info("IGNORED (update/noise)")
@@ -403,6 +416,8 @@ def parse_channel_four(
     sl = extract_sl(lines) or ""
     tps = extract_tps(lines)
     rr = extract_rr(text)
+    if not rr and entry and sl and tps:
+        rr = calculate_rr(entry, sl, tps[0])
 
     entry_range: Optional[Tuple[str, str]] = None
     for l in lines:
@@ -444,14 +459,14 @@ def parse_channel_four(
     except Exception:
         pass
 
-    return to_unified(signal, chat_id, skip_rr_for, signal.get("extra", {}))
+    return to_unified(signal, chat_id, signal.get("extra", {}))
 
-def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Optional[str]:
+def parse_signal(text: str, chat_id: int) -> Optional[str]:
     text = normalize_numbers(text)
     # Special-case: United Kings parser
     if chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text):
         try:
-            res = parse_signal_united_kings(text, chat_id, skip_rr_for)
+            res = parse_signal_united_kings(text, chat_id)
             if res is not None:
                 return res
         except Exception as e:
@@ -473,6 +488,8 @@ def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Op
     sl = extract_sl(lines) or ""
     tps = extract_tps(lines)
     rr = extract_rr(text)
+    if not rr and entry and sl and tps:
+        rr = calculate_rr(entry, sl, tps[0])
 
     signal = {
         "symbol": symbol,
@@ -501,7 +518,7 @@ def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Op
     except Exception:
         pass
 
-    return to_unified(signal, chat_id, skip_rr_for, signal.get("extra", {}))
+    return to_unified(signal, chat_id, signal.get("extra", {}))
 
 # ----------------------------------------------------------------------------
 # Dedupe helper — اثرانگشت محتوا
@@ -568,7 +585,6 @@ class SignalBot:
         session_string: str,
         from_channels: Iterable[Union[int, str]],
         to_channels: Iterable[Union[int, str]],
-        skip_rr_chat_ids: Iterable[int] = (),
         retry_delay: int = 5,
         max_retries: int | None = None,
     ):
@@ -592,7 +608,6 @@ class SignalBot:
             norm_to.append(c)
         self.to_channels = norm_to
 
-        self.skip_rr_chat_ids = set(skip_rr_chat_ids)
         self.client: Optional[TelegramClient] = None
         self._running = False
         self._callback: Optional[Callable[[dict], None]] = None
@@ -689,7 +704,6 @@ class SignalBot:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             self.client = TelegramClient(StringSession(self.session_string), self.api_id, self.api_hash)
-            skip_rr_for = self.skip_rr_chat_ids
 
             @self.client.on(events.NewMessage(chats=self.from_channels, incoming=True))
             async def handler(event):
@@ -706,7 +720,7 @@ class SignalBot:
                     if self._dedup_and_remember(int(event.chat_id), event.message):
                         return
 
-                    formatted = parse_signal(text, event.chat_id, skip_rr_for)
+                    formatted = parse_signal(text, event.chat_id)
                     if not formatted:
                         return
 
@@ -849,14 +863,11 @@ if __name__ == "__main__":
     except Exception:
         to_channels = []
 
-    skip_rr_for: set[int] = {1286609636}  # کانال سوم بدون R/R
-
     bot = SignalBot(
         api_id,
         api_hash,
         session_string,
         from_channels,
         to_channels,
-        skip_rr_for,
     )
     bot.start()

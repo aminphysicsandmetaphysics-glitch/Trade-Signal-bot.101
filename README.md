@@ -9,6 +9,7 @@ This repository contains a Telegram signal‑forwarding bot designed to run 24/7
 * Compact, unified output format that omits the original source.
 * Web dashboard for configuring API credentials, source/destination channels and for starting/stopping the bot.
 * Automatic reconnection to Telegram if the client disconnects.
+* Automatically computes and displays risk/reward (R/R) ratio when possible.
 
 ## Repository Layout
 
@@ -50,7 +51,7 @@ README.md            # This file
    python app.py
    ```
 
-4. Open http://127.0.0.1:5000 in your browser and fill in your API ID, API hash, session string, source channels and destination channels. Optionally provide channel IDs in **skip_rr_channels** to suppress R/R values for those chats. Click **Start Bot** to begin forwarding.
+4. Open http://127.0.0.1:5000 in your browser and fill in your API ID, API hash, session string, source channels and destination channels. Click **Start Bot** to begin forwarding.
 
 ## Deploying to Render
 
@@ -67,7 +68,6 @@ README.md            # This file
    * `API_HASH` – your Telegram API hash.
    * `SOURCES` – a JSON array of source channel usernames or numeric IDs (e.g. `["@sourceA", -1001234567890]`).
    * `DESTS` – a JSON array of destination channel usernames or numeric IDs.
-   * `SKIP_RR_CHANNELS` – optional JSON array or comma-separated list of channel IDs for which risk/reward should be omitted.
    * `SESSION_STRING` – the session string generated earlier.
 
 5. Deploy the service.  Once running, visit `/` to configure the bot if you have not set environment variables.  The dashboard allows you to start and stop the bot without redeploying.
@@ -76,3 +76,4 @@ README.md            # This file
 
 * Channel identifiers prefixed with `@` are resolved automatically.  Numeric channel IDs (e.g. 1467736193) are coerced to the proper negative format (`-1001467736193`) for Telegram API compatibility.
 * If a source channel has forwarding restrictions enabled, the bot will attempt to copy the content instead of forwarding.  This fallback works for both text messages and media messages.
+* R/R is computed automatically from entry, stop loss and the first take profit if not explicitly provided in the message.
