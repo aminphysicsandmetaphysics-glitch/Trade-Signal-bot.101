@@ -6,6 +6,7 @@
 <div class="card">
   <h2>تنظیمات</h2>
   <form method="post" action="{{ url_for('save_config') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
     <div class="row">
       <div class="col-6">
         <label>API ID</label>
@@ -38,9 +39,11 @@
 <div class="card">
   <h2>کنترل ربات</h2>
   <form method="post" action="{{ url_for('start_bot') }}" style="display:inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
     <button class="primary">Start Bot</button>
   </form>
   <form method="post" action="{{ url_for('stop_bot') }}" style="display:inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
     <button>Stop Bot</button>
   </form>
   <div style="margin-top:8px;">

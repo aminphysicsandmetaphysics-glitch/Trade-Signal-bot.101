@@ -7,6 +7,7 @@ def test_start_bot_invalid_api_id(monkeypatch):
     monkeypatch.setenv("ADMIN_USER", "u")
     monkeypatch.setenv("ADMIN_PASS", "p")
     app = importlib.reload(importlib.import_module("app"))
+    app.app.config["WTF_CSRF_ENABLED"] = False
 
     # Populate config with required fields but invalid api_id
     app.config_store.update(

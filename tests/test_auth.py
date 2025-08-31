@@ -5,7 +5,9 @@ def _load_app(monkeypatch):
     monkeypatch.setenv("SESSION_SECRET", "test")
     monkeypatch.setenv("ADMIN_USER", "u")
     monkeypatch.setenv("ADMIN_PASS", "p")
-    return importlib.reload(importlib.import_module("app"))
+    app = importlib.reload(importlib.import_module("app"))
+    app.app.config["WTF_CSRF_ENABLED"] = False
+    return app
 
 
 def test_login_required(monkeypatch):
