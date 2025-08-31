@@ -806,7 +806,7 @@ def _validate_tp_sl(
 
 def parse_signal_united_kings(
     text: str, chat_id: int, *, return_meta: bool = False
-) -> Tuple[Optional[Union[str, Dict[str, Any]]], Optional[str]]:
+) -> Tuple[Optional[Union[str, Tuple[str, Dict[str, Any]]]], Optional[str]]:
     """Parse a United Kings style signal.
 
     Parameters
@@ -826,10 +826,11 @@ def parse_signal_united_kings(
 
     Returns
     -------
-    Tuple[Optional[str], Optional[str]]
+    Tuple[Optional[Union[str, Tuple[str, Dict[str, Any]]]], Optional[str]]
         A pair of ``(result, reason)`` where ``result`` is the formatted
-        signal string or ``None`` if the message is ignored and ``reason``
-        contains the ignore cause.
+        signal string or ``(formatted, meta)`` when ``return_meta`` is
+        ``True``. If the message is ignored ``result`` is ``None`` and
+        ``reason`` contains the ignore cause.
     """
     if looks_like_update(text):
         return None, "update/noise"
@@ -922,9 +923,10 @@ def parse_signal_united_kings(
     if not _validate_tp_sl(position, calc_entry, sl, tps, tuple(signal["entry_range"])):
         return None, "invalid"
 
+    result = to_unified(signal, chat_id, extra)
     if return_meta:
-        return signal, None
-    return to_unified(signal, chat_id, extra), None
+        return (result, signal), None
+    return result, None
 
 
 def parse_channel_four(
@@ -1130,7 +1132,7 @@ def parse_signal(
     is_united_kings = chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text)
     if is_united_kings:
         try:
-            res, reason = parse_signal_united_kings(text, chat_id)
+            res, reason = parse_signal_united_kings(text, chat_id, return_meta=return_meta)
             if res is not None:
                 return res
             if reason in {"no entry range", "no position"}:
@@ -1162,7 +1164,11 @@ def parse_message_by_source(
 
     name = (source_name or "").lower()
     if "united" in name and "kings" in name:
-        return parse_signal_united_kings(text, 0, return_meta=True)
+        res, reason = parse_signal_united_kings(text, 0, return_meta=True)
+        if res is None:
+            return None, reason
+        _, meta = res
+        return meta, reason
     if "gold" in name and "exclusive" in name:
         return parse_gold_exclusive(text)
     if "lingrid" in name:
