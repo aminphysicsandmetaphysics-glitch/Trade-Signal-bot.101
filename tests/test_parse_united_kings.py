@@ -70,7 +70,9 @@ def test_parse_united_kings_noise(message):
 
 def test_parse_united_kings_tp_equal_entry():
     message = """#XAUUSD\nBuy gold\n@1900-1910\nTP1 : 1900\nTP2 : 1915\nSL : 1890\n"""
-    assert parse_signal_united_kings(message, 1234) is None
+    res, reason = parse_signal_united_kings(message, 1234)
+    assert res is None
+    assert reason == "invalid"
 
 
 def test_united_kings_entry_range_assignment(monkeypatch):
@@ -93,35 +95,51 @@ def test_united_kings_entry_range_assignment(monkeypatch):
 def test_united_kings_missing_position_logged(caplog):
     message = """#XAUUSD\n@1900-1910\nTP1 : 1915\nSL : 1890\n"""
     with caplog.at_level(logging.INFO):
-        assert parse_signal_united_kings(message, 1234) is None
-    assert "no position" in caplog.text.lower()
+        res, reason = parse_signal_united_kings(message, 1234)
+    assert res is None
+    assert reason == "no position"
+    assert "no position" not in caplog.text.lower()
 
 
 def test_united_kings_buy_synonym_grab():
     message = """#XAUUSD\ngrab\n@1900-1910\nTP1 : 1915\nSL : 1890\n"""
-    result = parse_signal_united_kings(message, 1234)
+    result, reason = parse_signal_united_kings(message, 1234)
     assert result and "Position: Buy" in result
+    assert reason is None
 
 
 def test_united_kings_buy_synonym_purchase():
     message = """#XAUUSD\npurchase\n@1900-1910\nTP1 : 1915\nSL : 1890\n"""
-    result = parse_signal_united_kings(message, 1234)
+    result, reason = parse_signal_united_kings(message, 1234)
     assert result and "Position: Buy" in result
+    assert reason is None
 
 
 def test_united_kings_sell_synonym_offload():
     message = """#XAUUSD\noffload\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
-    result = parse_signal_united_kings(message, 1234)
+    result, reason = parse_signal_united_kings(message, 1234)
     assert result and "Position: Sell" in result
+    assert reason is None
 
 
 def test_united_kings_sell_synonym_unload():
     message = """#XAUUSD\nunload\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
-    result = parse_signal_united_kings(message, 1234)
+    result, reason = parse_signal_united_kings(message, 1234)
     assert result and "Position: Sell" in result
+    assert reason is None
 
 
 def test_united_kings_sell_synonym_dump():
     message = """#XAUUSD\ndump\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
-    result = parse_signal_united_kings(message, 1234)
+    result, reason = parse_signal_united_kings(message, 1234)
     assert result and "Position: Sell" in result
+    assert reason is None
+
+
+def test_united_kings_fallback_to_classic():
+    message = (
+        "#XAUUSD\nBuy\nEntry Price : 1932\nTP1 : 1935\nTP2 : 1940\nStop Loss : 1925\n"
+    )
+    chat_id = next(iter(signal_bot.UNITED_KINGS_CHAT_IDS))
+    result = parse_signal(message, chat_id, {})
+    assert result and "Position: Buy" in result
