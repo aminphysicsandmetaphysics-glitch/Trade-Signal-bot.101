@@ -929,7 +929,6 @@ class SignalBot:
         """Process a new incoming message event."""
         try:
             text = event.message.message or ""
-            text = normalize_numbers(text)
             snippet = text[:160].replace("\n", " ")
             log.info(f"MSG from {event.chat_id}: {snippet} ...")
 
