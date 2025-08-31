@@ -1164,13 +1164,18 @@ def parse_message_by_source(
     routed to a channel-specific parser.
     """
     text = normalize_numbers(text)
+    gold_present = "GOLD" in (text or "").upper()
     lines = _strip_noise_lines((text or "").splitlines())
     text = "\n".join(lines)
     if not text:
         return None, "empty"
 
-    name = (source_name or "").lower()
-    if "united" in name and "kings" in name:
+    # Prioritise GOLD messages regardless of source naming
+    if gold_present:
+        return parse_gold_exclusive(text)
+
+    name = (source_name or "").strip().lower()
+    if name == "united kings vip":
         return parse_signal_united_kings(text, 0, return_meta=True)
     if "gold" in name and "exclusive" in name:
         return parse_gold_exclusive(text)
