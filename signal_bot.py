@@ -565,10 +565,17 @@ def _content_fingerprint(ev_msg, chat_id: int) -> str:
 def _norm_chat_identifier(x: Union[int, str]) -> Union[int, str]:
     """Normalise channel identifiers: '@name' / 'https://t.me/name' / numeric."""
     if isinstance(x, int):
-        return x
+        # Ensure numeric identifiers are coerced to Telegram channel IDs
+        return _coerce_channel_id(x)
+
     s = (x or "").strip()
     s = re.sub(r"^https?://t\.me/", "", s, flags=re.IGNORECASE)
     s = s.lstrip("@").strip()
+
+    # If the remaining string is purely numeric, convert to int and coerce
+    if re.fullmatch(r"-?\d+", s):
+        return _coerce_channel_id(int(s))
+
     return s
 
 
@@ -576,6 +583,10 @@ def _coerce_channel_id(x: Union[int, str]) -> Union[int, str]:
     """Coerce positive numeric IDs to Telegram channel form -100XXXXXXXXXX."""
     if isinstance(x, int):
         return x if x < 0 else int("-100" + str(x))
+
+    if isinstance(x, str) and re.fullmatch(r"\d+", x):
+        return int("-100" + x)
+
     return x
 
 
