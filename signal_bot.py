@@ -525,7 +525,11 @@ def _looks_like_united_kings(text: str) -> bool:
     return has_range and has_sl and has_tp and has_pos
 
 
-def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
+def parse_signal_united_kings(
+    text: str,
+    chat_id: int,
+    skip_rr_for: Optional[Iterable[int]] = None,
+) -> Optional[str]:
     if looks_like_update(text):
         log.info("IGNORED (update/noise)")
         return None
@@ -558,7 +562,11 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
         s = f"{x:.5f}".rstrip("0").rstrip(".")
         return s
 
-    entry = _fmt(lo)
+    if "@" in m.group(0):
+        entry_val = lo
+    else:
+        entry_val = (lo + hi) / 2
+    entry = _fmt(entry_val)
     entry_range = [_fmt(lo), _fmt(hi)]
 
     # SL
@@ -585,7 +593,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
         return None
 
     rr = extract_rr(text)
-    if not rr:
+    if not rr and not (skip_rr_for and chat_id in skip_rr_for):
         rr = calculate_rr(entry, sl, tps[0])
 
     extra = {"entries": {"range": entry_range}}
@@ -686,19 +694,16 @@ def parse_signal(
     text: str, chat_id: int, profile: Dict[str, Any] | None = None
 ) -> Optional[str]:
     profile = profile or {}
+    skip_rr_for = profile.get("skip_rr_for")
     text = normalize_numbers(text)
     text = _strip_noise_lines(text)
+    if (chat_id in UNITED_KINGS_CHAT_IDS) or _looks_like_united_kings(text):
+        res = parse_signal_united_kings(text, chat_id, skip_rr_for)
+        if res:
+            return res
     if not text:
         log.info("IGNORED (empty)")
         return None
-    # Special-case: United Kings parser
-    if chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text):
-        try:
-            res = parse_signal_united_kings(text, chat_id)
-            if res is not None:
-                return res
-        except Exception as e:
-            log.debug(f"United Kings parser failed: {e}")
 
     # حذف پیام‌های غیرسیگنال (آپدیت/تبلیغ/نتیجه)
     if looks_like_update(text):
