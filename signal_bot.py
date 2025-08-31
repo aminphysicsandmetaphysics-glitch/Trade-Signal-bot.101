@@ -541,6 +541,8 @@ class SignalBot:
         sink: Union[int, str],
         copy_if_protected: bool = True,
         skip_rr_for: Iterable[int] = (),
+        retry_delay: float = 5.0,
+        max_retries: Optional[int] = None,
     ):
         self.api_id = api_id
         self.api_hash = api_hash
@@ -549,6 +551,8 @@ class SignalBot:
         self.sink = self._normalize_channel_id(sink)
         self.copy_if_protected = copy_if_protected
         self.skip_rr_for = set(skip_rr_for)
+        self.retry_delay = retry_delay
+        self.max_retries = max_retries
 
         self._running = False
         self._client = None
@@ -570,12 +574,9 @@ class SignalBot:
     def running(self) -> bool:
         return self._running
 
-    # Run loop
-    async def _run(self):
+    def _create_client(self):
         session = StringSession(self.string_session)
         client = TelegramClient(session, self.api_id, self.api_hash)
-        await client.connect()
-        self._client = client
 
         @client.on(events.NewMessage(chats=self.sources))
         async def handler(event):
@@ -619,8 +620,7 @@ class SignalBot:
             except Exception as e:
                 log.exception(f"Unhandled in handler: {e}")
 
-        log.info("Bot is up; listening to sources.")
-        await client.run_until_disconnected()
+        return client
 
     async def _copy_message(self, client, event, parsed_text: str):
         self._copy_rate.acquire()
@@ -635,12 +635,32 @@ class SignalBot:
         if self._running:
             return
         self._running = True
-        while True:
+        attempts = 0
+        client = self._create_client()
+        self._client = client
+        while self._running and (self.max_retries is None or attempts < self.max_retries):
             try:
-                asyncio.run(self._run())
+                log.info("Bot is up; listening to sources.")
+                client.run_until_disconnected()
+                break
             except KeyboardInterrupt:
                 log.info("Interrupted by user.")
                 break
             except Exception as e:
-                log.exception(f"Fatal in main loop; restarting in 5s: {e}")
-                time.sleep(5)
+                attempts += 1
+                log.exception(
+                    f"Fatal in main loop; restarting in {self.retry_delay}s: {e}"
+                )
+                if self.max_retries is not None and attempts >= self.max_retries:
+                    break
+                time.sleep(self.retry_delay)
+                try:
+                    client.loop.run_until_complete(client.disconnect())
+                except Exception:
+                    pass
+                try:
+                    client.loop.run_until_complete(client.connect())
+                except Exception:
+                    client = self._create_client()
+                    self._client = client
+        self._running = False
