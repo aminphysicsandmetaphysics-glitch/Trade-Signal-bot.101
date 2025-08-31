@@ -34,6 +34,16 @@ INVALID_SIGNALS = [
     """#XAUUSD\nSell\n@1900-1910\nTP1 : 1912\nTP2 : 1890\nSL : 1915\n""",
     # Missing position
     """#XAUUSD\n@1900-1910\nTP1 : 1915\nSL : 1890\n""",
+    # SL not below entry for buy
+    """#XAUUSD\nBuy\nEntry Price : 1900\nTP1 : 1910\nTP2 : 1920\nStop Loss : 1905\n""",
+    # SL not above entry for sell
+    """#XAUUSD\nSell\nEntry Price : 1900\nTP1 : 1890\nTP2 : 1880\nStop Loss : 1895\n""",
+    # Range with TP inside entry range for buy
+    """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1905\nTP2 : 1908\nSL : 1890\n""",
+    # Range with SL inside range for buy
+    """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1915\nSL : 1905\n""",
+    # Range with SL inside range for sell
+    """#XAUUSD\nSell\n@1900-1910\nTP1 : 1890\nSL : 1905\n""",
 ]
 
 NOISE_MESSAGES = [
