@@ -53,6 +53,19 @@ NOISE_MESSAGES = [
 ]
 
 
+def _capture_uk(message: str, monkeypatch):
+    captured = {}
+
+    def fake_to_unified(signal, chat_id, extra):
+        captured["signal"] = signal
+        captured["extra"] = extra
+        return "OK"
+
+    monkeypatch.setattr(signal_bot, "to_unified", fake_to_unified)
+    res, reason = parse_signal_united_kings(message, 1234)
+    return res, reason, captured
+
+
 @pytest.mark.parametrize("message,expected", VALID_SIGNALS)
 def test_parse_united_kings_valid(message, expected):
     assert parse_signal(message, 1234, {}) == expected
@@ -91,6 +104,50 @@ def test_united_kings_entry_range_assignment(monkeypatch):
     assert captured["signal"]["entry"] is None
     assert captured["extra"]["entries"]["range"] == ["1900", "1910"]
     assert captured["extra"].get("show_entry_range_only") is True
+
+
+def test_united_kings_entry_range_at_uses_lower_bound(monkeypatch):
+    captured = {}
+    orig = signal_bot.calculate_rr
+
+    def fake_rr(entry, sl, tp):
+        captured["entry"] = entry
+        return orig(entry, sl, tp)
+
+    def fake_to_unified(signal, chat_id, extra):
+        captured["extra"] = extra
+        return "OK"
+
+    monkeypatch.setattr(signal_bot, "calculate_rr", fake_rr)
+    monkeypatch.setattr(signal_bot, "to_unified", fake_to_unified)
+
+    message = """#XAUUSD\nBuy gold\n@1900-1910\nTP1 : 1915\nTP2 : 1920\nSL : 1890\n"""
+    parse_signal_united_kings(message, 1234)
+
+    assert float(captured["entry"]) == 1900
+    assert captured["extra"]["entries"]["range"] == ["1900", "1910"]
+
+
+def test_united_kings_entry_range_midpoint_without_at(monkeypatch):
+    captured = {}
+    orig = signal_bot.calculate_rr
+
+    def fake_rr(entry, sl, tp):
+        captured["entry"] = entry
+        return orig(entry, sl, tp)
+
+    def fake_to_unified(signal, chat_id, extra):
+        captured["extra"] = extra
+        return "OK"
+
+    monkeypatch.setattr(signal_bot, "calculate_rr", fake_rr)
+    monkeypatch.setattr(signal_bot, "to_unified", fake_to_unified)
+
+    message = """#XAUUSD\nBuy gold\n1900-1910\nTP1 : 1915\nTP2 : 1920\nSL : 1890\n"""
+    parse_signal_united_kings(message, 1234)
+
+    assert float(captured["entry"]) == 1905
+    assert captured["extra"]["entries"]["range"] == ["1900", "1910"]
 
 
 def test_united_kings_missing_position_logged(caplog):
