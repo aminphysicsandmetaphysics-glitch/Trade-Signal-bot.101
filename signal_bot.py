@@ -79,6 +79,22 @@ UNITED_KINGS_CHAT_IDS = {
     -1001642415461,
 }
 
+# United Kings specific regex patterns
+UK_BUY_RE = re.compile(r"\b(?:buy|long)\b", re.IGNORECASE)
+UK_SELL_RE = re.compile(r"\b(?:sell|short)\b", re.IGNORECASE)
+# Entry is provided as a range after '@' separated by a dash (various unicode dashes)
+UK_ENTRY_RANGE_RE = re.compile(
+    r"@\s*(-?\d+(?:\.\d+)?)\s*[-\u2010-\u2015]\s*(-?\d+(?:\.\d+)?)"
+)
+UK_SL_RE = re.compile(r"\bS\s*L\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
+UK_TP_RE = re.compile(r"\bT\s*P\s*\d*\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
+UK_NOISE_LINES = [
+    re.compile(r"united\s+kings", re.IGNORECASE),
+    re.compile(r"tp\s+(?:hit|reached)", re.IGNORECASE),
+    re.compile(r"sl\s+(?:hit|reached)", re.IGNORECASE),
+    re.compile(r"result", re.IGNORECASE),
+]
+
 
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
@@ -236,23 +252,33 @@ def to_unified(
 
 
 def _clean_uk_lines(text: str) -> List[str]:
-    """Normalise and trim United Kings signal lines."""
+    """Normalise United Kings message lines removing known noise."""
     lines: List[str] = []
     for raw in (text or "").splitlines():
         raw = raw.strip()
         raw = re.sub(r"^[\-•\s]+", "", raw)
-        if raw:
-            lines.append(raw)
+        if not raw:
+            continue
+        # Skip noise or promotional lines
+        if any(pat.search(raw) for pat in UK_NOISE_LINES):
+            continue
+        lines.append(raw)
     return lines
 
 
 def _looks_like_united_kings(text: str) -> bool:
     """Heuristic check for United Kings style messages."""
     lines = _clean_uk_lines(text)
-    joined = " ".join(lines).lower()
-    if "united" in joined and "king" in joined:
+    if not lines:
+        return False
+    joined = " ".join(lines)
+    if re.search(r"united\s+kings", joined, re.IGNORECASE):
         return True
-    return any("tp" in l.lower() for l in lines) and any("sl" in l.lower() for l in lines)
+    return (
+        UK_ENTRY_RANGE_RE.search(joined)
+        and UK_SL_RE.search(joined)
+        and UK_TP_RE.search(joined)
+    )
 
 
 def parse_signal_united_kings(
@@ -267,13 +293,60 @@ def parse_signal_united_kings(
         log.info("IGNORED (empty)")
         return None
 
-    symbol = guess_symbol(text) or ""
-    position = guess_position(text) or ""
-    entry = extract_entry(lines) or ""
-    sl = extract_sl(lines) or ""
-    tps = extract_tps(lines)
+    joined = " ".join(lines)
+    symbol = guess_symbol(joined) or ""
+
+    position = ""
+    if any(UK_BUY_RE.search(l) for l in lines):
+        position = "Buy"
+    elif any(UK_SELL_RE.search(l) for l in lines):
+        position = "Sell"
+
+    # Entry range like '@1900-1910'
+    m = None
+    for l in lines:
+        m = UK_ENTRY_RANGE_RE.search(l)
+        if m:
+            break
+    if not m:
+        log.info("IGNORED (no entry range)")
+        return None
+    p1, p2 = float(m.group(1)), float(m.group(2))
+    lo, hi = (p1, p2) if p1 <= p2 else (p2, p1)
+
+    def _fmt(x: float) -> str:
+        s = f"{x:.5f}".rstrip("0").rstrip(".")
+        return s
+
+    entry = _fmt((lo + hi) / 2)
+    entry_range = (_fmt(lo), _fmt(hi))
+
+    # SL
+    sl = ""
+    for l in lines:
+        sm = UK_SL_RE.search(l)
+        if sm:
+            sl = sm.group(1)
+            break
+    if not sl:
+        log.info("IGNORED (no SL)")
+        return None
+
+    # TPs
+    tps: List[str] = []
+    for l in lines:
+        for tm in UK_TP_RE.finditer(l):
+            tps.append(tm.group(1))
+    # unique preserve order
+    seen = set()
+    tps = [x for x in tps if not (x in seen or seen.add(x))]
+    if not tps:
+        log.info("IGNORED (no TP)")
+        return None
+
     rr = extract_rr(text)
 
+    extra = {"entries": {"range": entry_range}}
     signal = {
         "symbol": symbol,
         "position": position,
@@ -281,31 +354,35 @@ def parse_signal_united_kings(
         "sl": sl,
         "tps": tps,
         "rr": rr,
+        "extra": extra,
     }
 
     if not is_valid(signal):
         log.info(f"IGNORED (invalid) -> {signal}")
         return None
 
-    return to_unified(signal, chat_id, skip_rr_for)
+    # sanity check: ensure TPs are in correct direction
+    try:
+        e = float(entry)
+        tp_vals = [float(tp) for tp in tps]
+        if position.upper().startswith("SELL") and any(tp > e for tp in tp_vals):
+            log.info("IGNORED (sell but TP > entry)")
+            return None
+        if position.upper().startswith("BUY") and any(tp < e for tp in tp_vals):
+            log.info("IGNORED (buy but TP < entry)")
+            return None
+    except Exception:
+        pass
+
+    return to_unified(signal, chat_id, skip_rr_for, extra)
 
 
 def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Optional[str]:
     text = normalize_numbers(text)
-    # Special-case: United Kings parser (if available)
-    uk_ids: set[int] = set()
-    looks_uk = None
-    parse_uk = None
-    try:
-        uk_ids = set(globals().get("UNITED_KINGS_CHAT_IDS", []))
-        looks_uk = globals().get("_looks_like_united_kings")
-        parse_uk = globals().get("parse_signal_united_kings")
-    except Exception as e:
-        log.debug(f"United Kings parser failed: {e}")
-
-    if parse_uk and (chat_id in uk_ids or (looks_uk and looks_uk(text))):
+    # Special-case: United Kings parser
+    if chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text):
         try:
-            res = parse_uk(text, chat_id, skip_rr_for)
+            res = parse_signal_united_kings(text, chat_id, skip_rr_for)
             if res is not None:
                 return res
         except Exception as e:
