@@ -237,7 +237,7 @@ ENTRY_KEYS = ["entry price", "entry", "e:"]
 
 # الگوی استخراج عدد پس از SL یا Stop Loss
 SL_VALUE_RE = re.compile(
-    r"\b(?:SL|Stop[-\s]*Loss)\s*[:\-]?\s*(-?\d+(?:\.\d+)?)",
+    r"\b(?:SL|Stop[-\s]*Loss)\s*[:\-]?\s*[$€£]?\s*(-?\d+(?:\.\d+)?)",
     re.IGNORECASE,
 )
 
