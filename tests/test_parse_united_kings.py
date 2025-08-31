@@ -88,3 +88,15 @@ def test_united_kings_missing_position_logged(caplog):
     with caplog.at_level(logging.INFO):
         assert parse_signal_united_kings(message, 1234) is None
     assert "no position" in caplog.text.lower()
+
+
+def test_united_kings_buy_synonym():
+    message = """#XAUUSD\ngrab long\n@1900-1910\nTP1 : 1915\nSL : 1890\n"""
+    result = parse_signal_united_kings(message, 1234)
+    assert result and "Position: Buy" in result
+
+
+def test_united_kings_sell_synonym():
+    message = """#XAUUSD\noffload\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
+    result = parse_signal_united_kings(message, 1234)
+    assert result and "Position: Sell" in result
