@@ -67,18 +67,39 @@ bot_instance: SignalBot | None = None
 # ----------------------------------------------------------------------------
 
 def _parse_channels(raw: str | None) -> list:
-    """Deserialize a JSON array or comma/space separated list of channels."""
+    """Deserialize a JSON array or comma/space separated list of channels.
+
+    Any element that looks like an integer (allowing a leading ``-``) will be
+    converted to :class:`int` while other elements remain as strings.  This
+    mirrors how Telegram channel identifiers may be provided as numeric IDs or
+    usernames.
+    """
+
     if not raw:
         return []
+
     raw = raw.strip()
+
+    def _coerce(part):
+        """Convert numeric strings to integers."""
+        if isinstance(part, str) and re.fullmatch(r"-?\d+", part):
+            try:
+                return int(part)
+            except ValueError:
+                return part
+        return part
+
+    parts: list
     try:
         data = json.loads(raw)
         if isinstance(data, list):
-            return data
+            parts = data
+        else:
+            raise ValueError
     except Exception:
-        pass
-    parts = [p.strip() for p in re.split(r"[,\s]+", raw) if p.strip()]
-    return parts
+        parts = [p.strip() for p in re.split(r"[,\s]+", raw) if p.strip()]
+
+    return [_coerce(p) for p in parts]
 
 
 def parse_from_channels(raw: str | None) -> list:
