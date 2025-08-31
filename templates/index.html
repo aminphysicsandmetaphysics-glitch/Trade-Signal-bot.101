@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
+<div class="toolbar" style="margin-bottom:16px;">
+  <a href="{{ url_for('profiles_page') }}"><button class="secondary">مدیریت پروفایل‌ها</button></a>
+</div>
 <div class="card">
   <h2>تنظیمات</h2>
   <form method="post" action="{{ url_for('save_config') }}">

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ 'ویرایش پروفایل' if profile else 'ایجاد پروفایل' }}</h2>
+<form id="profileForm">
+  <label>نام پروفایل</label>
+  <input name="name" value="{{ profile.name if profile else '' }}" {{ 'readonly' if profile else '' }} required>
+  <label>کانال‌های منبع</label>
+  <textarea name="from_channels" placeholder='[@src1, -10012345]'>{{ profile.from_channels|join(', ') if profile else '' }}</textarea>
+  <label>کانال‌های مقصد</label>
+  <textarea name="to_channels" placeholder='[@dest1, @dest2]'>{{ profile.to_channels|join(', ') if profile else '' }}</textarea>
+  <label>گزینه‌های پارس</label>
+  <input name="parse_options" value="{{ profile.parse_options if profile else '' }}">
+  <div class="btns">
+    <button class="primary" type="submit">ذخیره</button>
+  </div>
+</form>
+
+{% if profile %}
+<h3>تست پیام نمونه</h3>
+<textarea id="sampleText" placeholder="پیام برای تست"></textarea>
+<button id="testBtn">تست</button>
+<pre id="testResult"></pre>
+{% endif %}
+
+<script>
+const form = document.getElementById('profileForm');
+if(form){
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(form).entries());
+    data.from_channels = data.from_channels ? data.from_channels.split(/[,\s]+/).filter(Boolean) : [];
+    data.to_channels = data.to_channels ? data.to_channels.split(/[,\s]+/).filter(Boolean) : [];
+    const method = "{{ 'PUT' if profile else 'POST' }}";
+    const url = "{{ url_for('api_profile', name=profile.name) if profile else url_for('api_profiles') }}";
+    const res = await fetch(url, {
+      method: method,
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    });
+    if(res.ok){
+      alert('Saved');
+      if(method === 'POST'){
+        location.href = '/profiles/' + data.name;
+      }
+    }else{
+      const j = await res.json().catch(()=>({}));
+      alert(j.error || 'Error');
+    }
+  });
+}
+
+const testBtn = document.getElementById('testBtn');
+if(testBtn){
+  testBtn.addEventListener('click', async () => {
+    const msg = document.getElementById('sampleText').value;
+    const res = await fetch("{{ url_for('api_profile_test', name=profile.name if profile else '') }}", {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: msg})
+    });
+    const j = await res.json();
+    document.getElementById('testResult').innerText = j.parsed || j.error || '';
+  });
+}
+</script>
+{% endblock %}
