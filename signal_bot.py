@@ -260,7 +260,10 @@ UK_TP_RE = re.compile(r"\bT\s*P\s*\d*\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECA
 UK_NOISE_LINES = [
     re.compile(r"united\s+kings", re.IGNORECASE),
     re.compile(r"tp\s+(?:hit|reached)", re.IGNORECASE),
+    re.compile(r"tp\s*almost", re.IGNORECASE),
     re.compile(r"sl\s+(?:hit|reached)", re.IGNORECASE),
+    re.compile(r"break\s*even", re.IGNORECASE),
+    re.compile(r"risk\s*free", re.IGNORECASE),
     re.compile(r"result", re.IGNORECASE),
 ]
 
