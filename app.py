@@ -93,7 +93,8 @@ config_store = {
 # Profiles are persisted to disk using :class:`ProfileStore`.  Each
 # profile is keyed by a unique ``name`` and stores channel lists along
 # with optional parsing options.
-profiles_store = ProfileStore("profiles.json")
+profile_store_path = os.environ.get("PROFILE_STORE_PATH", "profiles.json")
+profiles_store = ProfileStore(profile_store_path)
 
 
 def _profile_to_dict(profile: ChannelProfile) -> dict:

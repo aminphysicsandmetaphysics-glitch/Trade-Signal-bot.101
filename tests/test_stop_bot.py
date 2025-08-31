@@ -1,12 +1,16 @@
 import asyncio
 from concurrent.futures import Future
 import importlib
+import tempfile
 
 
 def test_stop_bot_route_disconnects_cleanly(monkeypatch):
     monkeypatch.setenv("SESSION_SECRET", "test")
     monkeypatch.setenv("ADMIN_USER", "u")
     monkeypatch.setenv("ADMIN_PASS", "p")
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    tmp.close()
+    monkeypatch.setenv("PROFILE_STORE_PATH", tmp.name)
     app = importlib.reload(importlib.import_module("app"))
     app.app.config["WTF_CSRF_ENABLED"] = False
 
@@ -57,6 +61,9 @@ def test_stop_bot_no_loop_does_not_crash(monkeypatch):
     monkeypatch.setenv("SESSION_SECRET", "test")
     monkeypatch.setenv("ADMIN_USER", "u")
     monkeypatch.setenv("ADMIN_PASS", "p")
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    tmp.close()
+    monkeypatch.setenv("PROFILE_STORE_PATH", tmp.name)
     app = importlib.reload(importlib.import_module("app"))
     app.app.config["WTF_CSRF_ENABLED"] = False
 

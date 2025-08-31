@@ -74,6 +74,7 @@ the following environment variables:
 * `SESSION_SECRET` – random string used to sign the Flask session.
 * `ADMIN_USER` – username for logging in.
 * `ADMIN_PASS` – password for logging in.
+* `PROFILE_STORE_PATH` – optional path for storing profile data (defaults to `profiles.json`).
 
 Visit `/login` and enter the credentials to access protected routes like
 `/`, `/save_config`, `/start_bot` and `/stop_bot`.
@@ -97,6 +98,7 @@ Visit `/login` and enter the credentials to access protected routes like
    * `SESSION_SECRET` – random string for Flask session security.
    * `ADMIN_USER` – username for the web dashboard.
    * `ADMIN_PASS` – password for the web dashboard.
+   * `PROFILE_STORE_PATH` – optional path for storing profile data (defaults to `profiles.json`).
 
 5. Deploy the service.  Once running, visit `/` to configure the bot if you have not set environment variables.  The dashboard allows you to start and stop the bot without redeploying.
 
