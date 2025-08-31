@@ -83,6 +83,13 @@ TP_KEYS = ["tp", "take profit", "take-profit", "t/p", "t p"]
 SL_KEYS = ["sl", "stop loss", "stop-loss", "s/l", "s l"]
 ENTRY_KEYS = ["entry price", "entry", "e:"]
 
+# Explicit TP/Target line detector and numeric extractor excluding unit-suffixed numbers
+TP_LINE_RE = re.compile(r"\b(?:tp\d*|target)\b", re.IGNORECASE)
+TP_VALUE_RE = re.compile(
+    r"(-?\d+(?:\.\d+)?)(?!\s*(?:pips?|pip|points?|pts?|percent|%))\b",
+    re.IGNORECASE,
+)
+
 # Special-case parsing for the "United Kings" channels
 # (IDs taken from known public channels)
 UNITED_KINGS_CHAT_IDS = {
@@ -211,6 +218,41 @@ def extract_sl(lines: List[str]) -> Optional[str]:
             if m:
                 return m.group(1)
     return None
+
+
+def classic_extract_tps(lines: List[str]) -> List[str]:
+    """Extract take profit values from lines using simple heuristics.
+
+    Only lines containing an explicit ``TP`` or ``Target`` keyword are
+    considered.  All numeric values in those lines are returned unless they
+    are immediately followed by unit words such as ``pips``.  Numbers that are
+    part of labels like ``TP1`` or ``Target 2`` are ignored.  Duplicate values
+    are removed while preserving the original order.
+    """
+
+    tps: List[str] = []
+    for l in lines:
+        if not TP_LINE_RE.search(l):
+            continue
+
+        for num in TP_VALUE_RE.findall(l):
+            # Skip TP/Target indices like "TP1" or "Target 2"
+            if re.fullmatch(r"\d+", num) and re.search(
+                r"\b(?:tp|target)(?:\s*[:\-]?\s*)?" + num + r"\b",
+                l,
+                re.IGNORECASE,
+            ):
+                continue
+            tps.append(num)
+
+    # Deduplicate while preserving order
+    seen = set()
+    uniq: List[str] = []
+    for x in tps:
+        if x not in seen:
+            uniq.append(x)
+            seen.add(x)
+    return uniq
 
 
 def extract_tps(lines: List[str]) -> List[str]:
