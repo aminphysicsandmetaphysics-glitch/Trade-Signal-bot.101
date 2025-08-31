@@ -168,3 +168,11 @@ def test_united_kings_direction_window_priority():
     result, reason = parse_signal_united_kings(message, 1234)
     assert result and "Position: Buy" in result
     assert reason is None
+
+
+def test_parse_united_kings_return_meta():
+    message = """#XAUUSD\nBuy gold\n@1900-1910\nTP1 : 1915\nTP2 : 1920\nSL : 1890\n"""
+    formatted, meta = parse_signal(message, 1234, {}, return_meta=True)
+    assert isinstance(meta, dict)
+    assert meta["symbol"] == "XAUUSD"
+    assert "Position: Buy" in formatted
