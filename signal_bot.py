@@ -534,7 +534,16 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     if not lines:
         log.info("IGNORED (empty)")
         return None
-    symbol = "XAUUSD"
+
+    symbol = ""
+    for raw in (text or "").splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        sym = "XAUUSD" if re.search(r"\bGOLD\b", raw, re.IGNORECASE) else (guess_symbol(raw) or "")
+        if sym:
+            symbol = sym
+            break
 
     position = ""
     if any(UK_BUY_RE.search(l) for l in lines):
@@ -542,10 +551,10 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     elif any(UK_SELL_RE.search(l) for l in lines):
         position = "Sell"
 
-    # Entry range like '@1900-1910' or '1900-1910'
+    # Entry range like '@1900-1910'
     m = None
-    for l in lines:
-        m = UK_RANGE_RE.search(l)
+    for raw in lines:
+        m = re.search(r"@\s*([0-9]+(?:\.\d+)?)\s*[-–]\s*([0-9]+(?:\.\d+)?)", raw)
         if m:
             break
     if not m:
@@ -554,12 +563,8 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     p1, p2 = float(m.group(1)), float(m.group(2))
     lo, hi = (p1, p2) if p1 <= p2 else (p2, p1)
 
-    def _fmt(x: float) -> str:
-        s = f"{x:.5f}".rstrip("0").rstrip(".")
-        return s
-
-    entry = _fmt(lo)
-    entry_range = [_fmt(lo), _fmt(hi)]
+    entry = f"{min(lo, hi)}"
+    extra_entries = {"range": [lo, hi]}
 
     # SL
     sl = ""
@@ -588,7 +593,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     if not rr:
         rr = calculate_rr(entry, sl, tps[0])
 
-    extra = {"entries": {"range": entry_range}}
+    extra = {"entries": extra_entries}
     signal = {
         "symbol": symbol,
         "position": position,

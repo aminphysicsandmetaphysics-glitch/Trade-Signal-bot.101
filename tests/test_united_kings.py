@@ -2,8 +2,9 @@ from signal_bot import parse_signal, _looks_like_united_kings, UNITED_KINGS_CHAT
 
 NEW_CHAT_ID = -1001234567890
 
-MESSAGE = """Buy
-1900-1910
+MESSAGE = """GOLD
+Buy
+@1900-1910
 TP1 : 1915
 TP2 : 1920
 SL : 1890
@@ -12,9 +13,9 @@ SL : 1890
 EXPECTED = """\
 📊 #XAUUSD
 📉 Position: Buy
-❗️ R/R : 1.5/1
-💲 Entry Price : 1905
-🎯 Entry Range : 1900 – 1910
+❗️ R/R : 1/1.5
+💲 Entry Price : 1900.0
+🎯 Entry Range : 1900.0 – 1910.0
 ✔️ TP1 : 1915
 ✔️ TP2 : 1920
 🚫 Stop Loss : 1890"""
