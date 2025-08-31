@@ -23,3 +23,15 @@ def test_invalid_words_not_matched(text):
 def test_symbol_aliases(text, expected):
     assert guess_symbol(text) == expected
 
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("🔥# EURUSD moon", "EURUSD"),
+        ("#GBP\u00a0USD", "GBPUSD"),
+        ("#EUR\u200fUSD", "EURUSD"),
+    ],
+)
+def test_hashtags_with_emoji_or_invisible(text, expected):
+    assert guess_symbol(text) == expected
+
