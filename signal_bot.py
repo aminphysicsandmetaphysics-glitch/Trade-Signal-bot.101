@@ -561,7 +561,19 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     if not lines:
         log.info("IGNORED (empty)")
         return None
-    symbol = "XAUUSD"
+
+    # Determine traded instrument based on keywords.
+    symbol = "XAUUSD"  # Default to gold
+    upper_lines = [l.upper().replace("#", "") for l in lines]
+    symbol_keywords = [
+        ("XAGUSD", ["SILVER", "XAGUSD", "XAG"]),
+        ("USOIL", ["USOIL", "OIL"]),
+        ("XAUUSD", ["GOLD", "XAUUSD", "XAU"]),
+    ]
+    for sym, words in symbol_keywords:
+        if any(any(w in line for w in words) for line in upper_lines):
+            symbol = sym
+            break
 
     position = ""
     if any(UK_BUY_RE.search(l) for l in lines):

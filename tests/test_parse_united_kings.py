@@ -68,3 +68,10 @@ def test_united_kings_entry_range_assignment(monkeypatch):
 
     assert captured["signal"]["entry"] == "1900"
     assert captured["extra"]["entries"]["range"] == ["1900", "1910"]
+
+
+def test_parse_united_kings_silver():
+    message = """Buy silver\n@24-24.5\nTP1 : 25\nTP2 : 25.5\nSL : 23.5\n"""
+    expected = """\
+📊 #XAGUSD\n📉 Position: Buy\n❗️ R/R : 1/2\n💲 Entry Price : 24\n🎯 Entry Range : 24 – 24.5\n✔️ TP1 : 25\n✔️ TP2 : 25.5\n🚫 Stop Loss : 23.5"""
+    assert parse_signal(message, -1002223574325, {}) == expected
