@@ -994,11 +994,13 @@ def parse_channel_four(
 def parse_gold_exclusive(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Parse messages from the 'Gold Exclusive' channel."""
     text = normalize_numbers(text)
-    base = f"#XAUUSD\n{text}"
+    symbol = normalize_symbol("XAUUSD")
+    base = f"#{symbol}\n{text}"
     parsed = parse_signal_classic(base, 0, {}, return_meta=True)
     if not parsed:
         return None, "invalid"
     _, meta = parsed
+    meta["symbol"] = normalize_symbol(meta.get("symbol", ""))
     tf = extract_tf(text)
     if tf:
         meta["tf"] = tf
@@ -1014,6 +1016,7 @@ def parse_lingrid(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     if not parsed:
         return None, "invalid"
     _, meta = parsed
+    meta["symbol"] = normalize_symbol(meta.get("symbol", ""))
     tf = extract_tf(text)
     if tf:
         meta["tf"] = tf
@@ -1029,6 +1032,7 @@ def parse_forex_rr(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     if not parsed:
         return None, "invalid"
     _, meta = parsed
+    meta["symbol"] = normalize_symbol(meta.get("symbol", ""))
     tf = extract_tf(text)
     if tf:
         meta["tf"] = tf
