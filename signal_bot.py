@@ -72,9 +72,32 @@ TP_KEYS = ["tp", "take profit", "take-profit", "t/p", "t p"]
 SL_KEYS = ["sl", "stop loss", "stop-loss", "s/l", "s l"]
 ENTRY_KEYS = ["entry price", "entry", "e:"]
 
+# Special-case parsing for the "United Kings" channels
+# (IDs taken from known public channels)
+UNITED_KINGS_CHAT_IDS = {
+    -1001709190364,
+    -1001642415461,
+}
+
 
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
+
+
+def normalize_numbers(text: str) -> str:
+    """Translate Persian/Arabic digits and separators to ASCII equivalents."""
+    if not text:
+        return ""
+
+    # Map Eastern Arabic and Persian digits to Western Arabic numerals
+    trans = {ord(c): str(i) for i, c in enumerate("٠١٢٣٤٥٦٧٨٩")}
+    trans.update({ord(c): str(i) for i, c in enumerate("۰۱۲۳۴۵۶۷۸۹")})
+
+    # Normalize decimal and thousands separators
+    trans[ord("٫")] = "."  # Arabic decimal separator
+    trans[ord("٬")] = ""  # Arabic thousands separator (remove)
+
+    return text.translate(trans)
 
 
 def guess_symbol(text: str) -> Optional[str]:
@@ -182,7 +205,14 @@ def is_valid(signal: Dict) -> bool:
     ]) and len(signal.get("tps", [])) >= 1
 
 
-def to_unified(signal: Dict, chat_id: int, skip_rr_for: Iterable[int] = ()) -> str:
+def to_unified(
+    signal: Dict,
+    chat_id: int,
+    skip_rr_for: Iterable[int] = (),
+    extra: Optional[Dict] = None,
+) -> str:
+    extra = extra if extra is not None else signal.get("extra", {})
+
     parts: List[str] = []
     parts.append(f"📊 #{signal['symbol']}")
     parts.append(f"📉 Position: {signal['position']}")
@@ -190,14 +220,96 @@ def to_unified(signal: Dict, chat_id: int, skip_rr_for: Iterable[int] = ()) -> s
     if rr and chat_id not in set(skip_rr_for):
         parts.append(f"❗️ R/R : {rr}")
     parts.append(f"💲 Entry Price : {signal['entry']}")
+    
+    entry_range = extra.get("entries", {}).get("range")
+    if entry_range:
+        try:
+            lo, hi = entry_range
+            parts.append(f"🎯 Entry Range : {lo} – {hi}")
+        except Exception:
+            pass
+
     for i, tp in enumerate(signal["tps"], 1):
         parts.append(f"✔️ TP{i} : {tp}")
     parts.append(f"🚫 Stop Loss : {signal['sl']}")
     return "\n".join(parts)
 
 
+def _clean_uk_lines(text: str) -> List[str]:
+    """Normalise and trim United Kings signal lines."""
+    lines: List[str] = []
+    for raw in (text or "").splitlines():
+        raw = raw.strip()
+        raw = re.sub(r"^[\-•\s]+", "", raw)
+        if raw:
+            lines.append(raw)
+    return lines
+
+
+def _looks_like_united_kings(text: str) -> bool:
+    """Heuristic check for United Kings style messages."""
+    lines = _clean_uk_lines(text)
+    joined = " ".join(lines).lower()
+    if "united" in joined and "king" in joined:
+        return True
+    return any("tp" in l.lower() for l in lines) and any("sl" in l.lower() for l in lines)
+
+
+def parse_signal_united_kings(
+    text: str, chat_id: int, skip_rr_for: Iterable[int] = ()
+) -> Optional[str]:
+    if looks_like_update(text):
+        log.info("IGNORED (update/noise)")
+        return None
+
+    lines = _clean_uk_lines(text)
+    if not lines:
+        log.info("IGNORED (empty)")
+        return None
+
+    symbol = guess_symbol(text) or ""
+    position = guess_position(text) or ""
+    entry = extract_entry(lines) or ""
+    sl = extract_sl(lines) or ""
+    tps = extract_tps(lines)
+    rr = extract_rr(text)
+
+    signal = {
+        "symbol": symbol,
+        "position": position,
+        "entry": entry,
+        "sl": sl,
+        "tps": tps,
+        "rr": rr,
+    }
+
+    if not is_valid(signal):
+        log.info(f"IGNORED (invalid) -> {signal}")
+        return None
+
+    return to_unified(signal, chat_id, skip_rr_for)
+
+
 def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Optional[str]:
+        text = normalize_numbers(text)
+        # Special-case: United Kings parser (if available)
+    try:
+        uk_ids = set(globals().get("UNITED_KINGS_CHAT_IDS", []))
+        looks_uk = globals().get("_looks_like_united_kings")
+        parse_uk = globals().get("parse_signal_united_kings")
+        if parse_uk and ((chat_id in uk_ids) or (looks_uk and looks_uk(text))):
+            res = parse_uk(text, chat_id, skip_rr_for)
+            if res is not None:
+                return res
+    except Exception as e:
+        log.debug(f"United Kings parser failed: {e}")
+
     # حذف پیام‌های غیرسیگنال (آپدیت/تبلیغ/نتیجه)
+        if chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text):
+        formatted = parse_signal_united_kings(text, chat_id, skip_rr_for)
+        if formatted:
+            return formatted
+
     if looks_like_update(text):
         log.info("IGNORED (update/noise)")
         return None
@@ -241,7 +353,7 @@ def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Op
     except Exception:
         pass
 
-    return to_unified(signal, chat_id, skip_rr_for)
+    return to_unified(signal, chat_id, skip_rr_for, signal.get("extra", {}))
 
 # ----------------------------------------------------------------------------
 # Dedupe helper — اثرانگشت محتوا
@@ -436,6 +548,7 @@ class SignalBot:
                 """Receive, parse, and forward/copy."""
                 try:
                     text = event.message.message or ""
+                    text = normalize_numbers(text)
                     snippet = text[:160].replace("\n", " ")
                     log.info(f"MSG from {event.chat_id}: {snippet} ...")
                     
