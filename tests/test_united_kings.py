@@ -17,7 +17,7 @@ SL : 1890
 
 EXPECTED = """\
 📊 #XAUUSD
-📉 Position: Buy Limit
+📉 Position: Buy
 ❗️ R/R : 1/1.5
 💲 Entry Price : 1900.0
 🎯 Entry Range : 1900 – 1910
