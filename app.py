@@ -13,6 +13,7 @@ import os
 import re
 import asyncio
 from threading import Thread
+from functools import wraps
 
 from flask import (
     Flask,
@@ -21,6 +22,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    session,
     url_for,
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -38,6 +40,11 @@ secret = os.environ.get("SESSION_SECRET")
 if not secret:
     raise RuntimeError("SESSION_SECRET environment variable must be set")
 app.secret_key = secret
+
+admin_user = os.environ.get("ADMIN_USER")
+admin_pass = os.environ.get("ADMIN_PASS")
+if not admin_user or not admin_pass:
+    raise RuntimeError("ADMIN_USER and ADMIN_PASS must be set")
 
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
@@ -111,16 +118,46 @@ def parse_to_channels(raw: str | None) -> list:
 
 
 # ----------------------------------------------------------------------------
+# Authentication
+# ----------------------------------------------------------------------------
+
+
+def login_required(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login"))
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if username == admin_user and password == admin_pass:
+            session["logged_in"] = True
+            flash("Logged in.", "success")
+            return redirect(url_for("index"))
+        flash("Invalid credentials.", "error")
+    return render_template("login.html")
+
+
+# ----------------------------------------------------------------------------
 # Routes
 # ----------------------------------------------------------------------------
 
 @app.route("/", methods=["GET"])
+@login_required
 def index():
     cfg = config_store
     return render_template("index.html", cfg=cfg)
 
 
 @app.route("/save_config", methods=["POST"])
+@login_required
 def save_config():
     api_id = request.form.get("api_id", "").strip()
     api_hash = request.form.get("api_hash", "").strip()
@@ -142,6 +179,7 @@ def save_config():
 
 
 @app.route("/start_bot", methods=["POST"])
+@login_required
 def start_bot():
     global bot_instance
     cfg = config_store
@@ -180,6 +218,7 @@ def start_bot():
 
 
 @app.route("/stop_bot", methods=["POST"])
+@login_required
 def stop_bot():
     global bot_instance
     if bot_instance and bot_instance.is_running():

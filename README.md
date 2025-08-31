@@ -53,6 +53,18 @@ README.md            # This file
 
 4. Open http://127.0.0.1:5000 in your browser and fill in your API ID, API hash, session string, source channels and destination channels. Click **Start Bot** to begin forwarding.
 
+## Authentication
+
+The dashboard is protected by a simple login. Before running the app set
+the following environment variables:
+
+* `SESSION_SECRET` – random string used to sign the Flask session.
+* `ADMIN_USER` – username for logging in.
+* `ADMIN_PASS` – password for logging in.
+
+Visit `/login` and enter the credentials to access protected routes like
+`/`, `/save_config`, `/start_bot` and `/stop_bot`.
+
 ## Deploying to Render
 
 1. Push this repository (without your session string) to GitHub.
@@ -69,6 +81,9 @@ README.md            # This file
    * `SOURCES` – a JSON array of source channel usernames or numeric IDs (e.g. `["@sourceA", -1001234567890]`).
    * `DESTS` – a JSON array of destination channel usernames or numeric IDs.
    * `SESSION_STRING` – the session string generated earlier.
+   * `SESSION_SECRET` – random string for Flask session security.
+   * `ADMIN_USER` – username for the web dashboard.
+   * `ADMIN_PASS` – password for the web dashboard.
 
 5. Deploy the service.  Once running, visit `/` to configure the bot if you have not set environment variables.  The dashboard allows you to start and stop the bot without redeploying.
 
