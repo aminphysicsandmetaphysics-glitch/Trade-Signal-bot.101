@@ -30,9 +30,12 @@ def test_handle_new_message_normalizes_once(monkeypatch):
 
     monkeypatch.setattr(signal_bot, "normalize_numbers", fake_normalize)
 
-    def fake_parse_signal(text, chat_id, profile):
+    def fake_parse_signal(text, chat_id, profile, *, return_meta=False):
         assert text == "۱۲۳۴"
-        return fake_normalize(text)
+        result = fake_normalize(text)
+        if return_meta:
+            return result, {"symbol": "", "position": ""}
+        return result
 
     monkeypatch.setattr(signal_bot, "parse_signal", fake_parse_signal)
 

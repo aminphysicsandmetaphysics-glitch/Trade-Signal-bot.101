@@ -932,8 +932,12 @@ def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
     return to_unified(signal, chat_id, signal.get("extra", {}))
 
 def parse_signal(
-    text: str, chat_id: int, profile: Dict[str, Any] | None = None
-) -> Optional[str]:
+    text: str,
+    chat_id: int,
+    profile: Dict[str, Any] | None = None,
+    *,
+    return_meta: bool = False,
+) -> Optional[Union[str, Tuple[str, Dict[str, Any]]]]:
     profile = profile or {}
     text = normalize_numbers(text)
     if not text:
@@ -997,7 +1001,10 @@ def parse_signal(
     if not validate_directional_consistency(signal):
         return None
 
-    return to_unified(signal, chat_id, signal.get("extra", {}))
+    result = to_unified(signal, chat_id, signal.get("extra", {}))
+    if return_meta:
+        return result, signal
+    return result
 
 # ----------------------------------------------------------------------------
 # Dedupe helper — اثرانگشت محتوا
@@ -1115,6 +1122,7 @@ class SignalBot:
         retry_delay: int = 5,
         max_retries: int | None = None,
         profiles: Optional[Dict[str, Dict[Union[int, str], Dict[str, Any]]]] = None,
+        routes: Optional[Dict[str, Dict[str, Iterable[Union[int, str]]]]] = None,
         active_profile: str = "default",
     ):
         self.api_id = api_id
@@ -1153,6 +1161,20 @@ class SignalBot:
                         norm_dests.append(d)
                     norm_map[src_norm] = {"dests": norm_dests, "template": cfg.get("template")}
                 self.profiles[name] = norm_map
+        # Routing overrides per profile
+        self.routes: Dict[str, Dict[str, List[Union[int, str]]]] = {}
+        if routes:
+            for name, mapping in routes.items():
+                norm_map: Dict[str, List[Union[int, str]]] = {}
+                for key, dests in (mapping or {}).items():
+                    if isinstance(dests, (str, int)):
+                        dests = [dests]
+                    norm_dests: List[Union[int, str]] = []
+                    for d in dests:
+                        d = _coerce_channel_id(_norm_chat_identifier(d))
+                        norm_dests.append(d)
+                    norm_map[str(key).upper()] = norm_dests
+                self.routes[name] = norm_map
         self.active_profile = active_profile
 
         self.client: Optional[TelegramClient] = None
@@ -1278,15 +1300,25 @@ class SignalBot:
                 return
 
             profile = resolve_profile(int(event.chat_id))
-            formatted = parse_signal(text, event.chat_id, profile)
-            if not formatted:
+            parsed = parse_signal(text, event.chat_id, profile, return_meta=True)
+            if not parsed:
                 log.info(f"Rejecting message from {event.chat_id}: {snippet}")
                 self.stats.increment("rejected")
                 self.stats.record(snippet, "rejected", "parse")
                 return
+            formatted, meta = parsed
 
             self.stats.increment("parsed")
             dests, template = self.resolve_targets(event.chat_id)
+
+            # Routing overrides based on symbol/position
+            symbol = (meta or {}).get("symbol", "")
+            position = (meta or {}).get("position", "")
+            key = f"{symbol}:{position}".upper()
+            route_map = self.routes.get(self.active_profile, {})
+            if key in route_map:
+                dests = route_map[key]
+
             if template:
                 try:
                     formatted = render_template(template, {"message": formatted})
