@@ -471,7 +471,8 @@ def to_unified(signal: Dict, chat_id: int, extra: Optional[Dict] = None) -> str:
     parts.append(f"📊 #{signal['symbol']}")
     parts.append(f"📉 Position: {signal['position']}")
     rr = signal.get("rr")
-    if rr:
+    skip_rr_for = {int(x) for x in profile.get("skip_rr_for", [])}
+    if rr and int(chat_id) not in skip_rr_for:
         parts.append(f"❗️ R/R : {rr}")
 
     entry_range = extra.get("entries", {}).get("range")

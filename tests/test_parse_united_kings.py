@@ -68,3 +68,20 @@ def test_united_kings_entry_range_assignment(monkeypatch):
 
     assert captured["signal"]["entry"] == "1900"
     assert captured["extra"]["entries"]["range"] == ["1900", "1910"]
+
+
+def test_united_kings_entry_range_midpoint(monkeypatch):
+    captured = {}
+
+    def fake_to_unified(signal, chat_id, extra):
+        captured["signal"] = signal
+        captured["extra"] = extra
+        return "OK"
+
+    monkeypatch.setattr(signal_bot, "to_unified", fake_to_unified)
+
+    message = """#XAUUSD\nBuy\n1900-1910\nTP1 : 1915\nSL : 1890\n"""
+    parse_signal_united_kings(message, 1234)
+
+    assert captured["signal"]["entry"] == "1905"
+    assert captured["extra"]["entries"]["range"] == ["1900", "1910"]
