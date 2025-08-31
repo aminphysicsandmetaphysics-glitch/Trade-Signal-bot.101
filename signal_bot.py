@@ -173,6 +173,7 @@ NON_SIGNAL_HINTS = [
     "result so far",
     "screenshots",
     "cheers",
+    "high-risk setup",
     "move sl",
     "put your sl",
     "risk free",
@@ -578,7 +579,6 @@ def _strip_noise_lines(lines: list[str]) -> list[str]:
                 or re.search(r"\b(buy|sell|entry|position)\b", low)
                 or BUY_SYNONYMS.search(raw)
                 or SELL_SYNONYMS.search(raw)
-                or re.search(r"high[- ]?risk", low)
             ):
                 cleaned.append(raw)
             continue
@@ -586,13 +586,6 @@ def _strip_noise_lines(lines: list[str]) -> list[str]:
         cleaned.append(raw)
 
     return cleaned
-
-
-def _extract_notes(text: str) -> List[str]:
-    notes: List[str] = []
-    if re.search(r"high[- ]?risk", text, re.IGNORECASE):
-        notes.append("High-Risk")
-    return notes
 
 
 def is_valid(signal: Dict) -> bool:
@@ -834,7 +827,6 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
     if looks_like_update(text):
         return None, "update/noise"
 
-    notes = _extract_notes(text)
     lines = _clean_uk_lines(text)
     if not lines:
         return None, "empty"
@@ -913,7 +905,6 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
         "tps": tps,
         "rr": rr,
         "extra": extra,
-        "notes": notes,
     }
 
     if not is_valid(signal):
@@ -926,9 +917,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
     return to_unified(signal, chat_id, extra), None
 
 
-def parse_channel_four(
-    text: str, chat_id: int, *, return_meta: bool = False
-) -> Optional[Union[str, Tuple[str, Dict[str, Any]]]]:
+def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
     """Parser for Channel Four style messages supporting entry ranges."""
     if looks_like_update(text):
         log.info("IGNORED (update/noise)")
@@ -962,7 +951,6 @@ def parse_channel_four(
                     entry = m.group(1)
                 break
 
-    notes = _extract_notes(text)
     signal = {
         "symbol": symbol,
         "position": position,
@@ -971,7 +959,6 @@ def parse_channel_four(
         "tps": tps,
         "rr": rr,
         "extra": {},
-        "notes": notes,
     }
     if entry_range:
         signal["extra"]["entries"] = {"range": entry_range}
@@ -984,10 +971,7 @@ def parse_channel_four(
     if not _validate_tp_sl(position, entry, sl, tps, entry_range):
         return None
 
-    result = to_unified(signal, chat_id, signal.get("extra", {}))
-    if return_meta:
-        return result, signal
-    return result
+    return to_unified(signal, chat_id, signal.get("extra", {}))
 
 
 def parse_signal_classic(
@@ -999,7 +983,6 @@ def parse_signal_classic(
 ) -> Optional[Union[str, Tuple[str, Dict[str, Any]]]]:
     profile = profile or {}
     text = normalize_numbers(text)
-    notes = _extract_notes(text)
     if not text:
         log.info("IGNORED (empty)")
         return None
@@ -1017,7 +1000,7 @@ def parse_signal_classic(
     if _has_entry_range(text):
         if profile.get("allow_entry_range"):
             try:
-                return parse_channel_four(text, chat_id, return_meta=return_meta)
+                return parse_channel_four(text, chat_id)
             except Exception as e:
                 log.debug(f"Entry range parser failed: {e}")
                 return None
@@ -1044,7 +1027,6 @@ def parse_signal_classic(
         "sl": sl,
         "tps": tps,
         "rr": rr,
-        "notes": notes,
     }
 
     if not is_valid(signal):
