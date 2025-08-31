@@ -284,7 +284,7 @@ UK_RANGE_RE = re.compile(
 # numeric values. Allow any non-digit characters between the labels and numbers
 # so patterns like "Stop Loss (SL) :3454.5" are matched.
 UK_SL_RE = re.compile(
-    r"(?:stop\D*loss\D*\(?\D*sl\D*\)?|sl|set\D+your\D+sl\D+at)\D*(-?\d+(?:\.\d+)?)",
+    r"(?:stop\D*loss(?:\D*sl)?|sl|set\D+your\D+sl\D+at)\D*(-?\d+(?:\.\d+)?)",
     re.IGNORECASE,
 )
 UK_TP_RE = re.compile(
