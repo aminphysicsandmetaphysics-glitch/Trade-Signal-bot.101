@@ -14,6 +14,10 @@ NOISY_CLEAN_PAIRS = [
         """------------------\nDaily ANALYSIS\n#XAUUSD\nSell\nEntry 1900\nSL 1910\nTP1 1890\n""",
         """#XAUUSD\nSell\nEntry 1900\nSL 1910\nTP1 1890\n""",
     ),
+    (
+        """آپدیت✅\n#USDJPY\nBuy\nEntry 110\nSL 109\nTP1 111\n""",
+        """#USDJPY\nBuy\nEntry 110\nSL 109\nTP1 111\n""",
+    ),
 ]
 
 

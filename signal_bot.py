@@ -121,7 +121,10 @@ POS_VARIANTS = [
 ]
 
 # کلیدواژه‌های نویز/آپدیت/تبلیغ که باید نادیده بگیریم
+# این فهرست به‌صورت دوزبانه (انگلیسی/فارسی) نگهداری می‌شود و همگی به حروف
+# کوچک و بدون نیم‌فاصله نرمال می‌شوند.
 NON_SIGNAL_HINTS = [
+    # English noise/update hints
     "activated",
     "tp reached",
     "result so far",
@@ -153,7 +156,39 @@ NON_SIGNAL_HINTS = [
     "profits",
     "week",
     "friday",
+    "make tp",
+    "make sl",
+    "make tp/sl",
+    "change tp",
+    "change sl",
+    "change tp/sl",
+    "upgrade your subscription",
+    # Persian noise/update hints
+    "آپدیت",
+    "فعال شد",
+    "اسکرین شات",
+    "اسکرینشات",
+    "تبریک",
 ]
+
+# الگوی حذف ایموجی‌ها قبل از بررسی کلیدواژه‌ها
+EMOJI_RE = re.compile(
+    "["
+    "\U0001F1E6-\U0001F1FF"  # flags
+    "\U0001F300-\U0001F5FF"  # symbols & pictographs
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F680-\U0001F6FF"  # transport & map symbols
+    "\U0001F700-\U0001F77F"  # alchemical symbols
+    "\U0001F780-\U0001F7FF"  # Geometric Shapes Extended
+    "\U0001F800-\U0001F8FF"  # Supplemental Arrows-C
+    "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+    "\U0001FA00-\U0001FA6F"  # Chess Symbols etc.
+    "\U0001FA70-\U0001FAFF"  # Symbols and Pictographs Extended-A
+    "\u2600-\u26FF"          # Misc symbols
+    "\u2700-\u27BF"          # Dingbats
+    "]+",
+    flags=re.UNICODE,
+)
 
 # Lines that are purely visual dividers ("----", "====", etc.)
 DIVIDER_LINE_RE = re.compile(r"^[\s\-\–\—\_\=\·\.\•\*➖]+$")
@@ -419,8 +454,17 @@ def calculate_rr(entry: str, sl: str, tp: str) -> Optional[str]:
         return f"1/{fmt(reward / risk)}"
 
 
+def _normalize_hint_text(text: str) -> str:
+    """Return *text* with half-spaces and emojis normalised for matching."""
+    if not text:
+        return ""
+    text = text.replace("\u200c", " ")
+    text = EMOJI_RE.sub(" ", text)
+    return text
+
+
 def looks_like_update(text: str) -> bool:
-    t = (text or "").lower()
+    t = _normalize_hint_text(text).lower()
     return any(key in t for key in NON_SIGNAL_HINTS)
 
 
