@@ -728,11 +728,16 @@ def parse_signal(
 ) -> Optional[str]:
     profile = profile or {}
     text = normalize_numbers(text)
-    lines = _strip_noise_lines((text or "").splitlines())
+    if not text:
+        log.info("IGNORED (empty)")
+        return None
+
+    lines = _strip_noise_lines(text.splitlines())
     text = "\n".join(lines)
     if not text:
         log.info("IGNORED (empty)")
         return None
+
     # Special-case: United Kings parser
     is_united_kings = chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text)
     if is_united_kings:
@@ -746,10 +751,6 @@ def parse_signal(
     # حذف پیام‌های غیرسیگنال (آپدیت/تبلیغ/نتیجه)
     if looks_like_update(text):
         log.info("IGNORED (update/noise)")
-        return None
-
-    if not lines:
-        log.info("IGNORED (empty)")
         return None
 
     if _has_entry_range(text):
