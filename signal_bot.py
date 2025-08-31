@@ -32,6 +32,7 @@ import hashlib
 import time
 from datetime import datetime, timezone, timedelta
 from collections import deque
+from threading import Lock
 from typing import List, Dict, Optional, Iterable, Callable, Union, Deque, Tuple, Any
 
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
@@ -923,6 +924,43 @@ def _coerce_channel_id(x: Union[int, str]) -> Union[int, str]:
 
 
 # ----------------------------------------------------------------------------
+# Statistics helper
+# ----------------------------------------------------------------------------
+
+
+class BotStats:
+    """Thread-safe counters and recent message storage."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self.received = 0
+        self.filtered = 0
+        self.parsed = 0
+        self.sent = 0
+        self.rejected = 0
+        self.messages: Deque[dict] = deque(maxlen=20)
+
+    def increment(self, field: str, amount: int = 1) -> None:
+        with self._lock:
+            setattr(self, field, getattr(self, field) + amount)
+
+    def record(self, text: str, status: str, reason: str | None = None) -> None:
+        with self._lock:
+            self.messages.appendleft({"text": text, "status": status, "reason": reason})
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                "received": self.received,
+                "filtered": self.filtered,
+                "parsed": self.parsed,
+                "sent": self.sent,
+                "rejected": self.rejected,
+                "messages": list(self.messages),
+            }
+
+
+# ----------------------------------------------------------------------------
 # SignalBot class (kept, with stability fixes: freshness + dedupe)
 # ----------------------------------------------------------------------------
 
@@ -985,6 +1023,7 @@ class SignalBot:
         self.retry_delay = retry_delay
         self.max_retries = max_retries
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self.stats = BotStats()
         
         # freshness/dedupe state
         self.startup_time = datetime.now(timezone.utc)
@@ -1088,19 +1127,27 @@ class SignalBot:
             text = event.message.message or ""
             snippet = text[:160].replace("\n", " ")
             log.info(f"MSG from {event.chat_id}: {snippet} ...")
+            self.stats.increment("received")
 
             if not self._fresh_enough(getattr(event.message, "date", self.startup_time)):
+                self.stats.increment("filtered")
+                self.stats.record(snippet, "filtered", "stale")
                 return
 
             if self._dedup_and_remember(int(event.chat_id), event.message):
+                self.stats.increment("filtered")
+                self.stats.record(snippet, "filtered", "duplicate")
                 return
 
             profile = resolve_profile(int(event.chat_id))
             formatted = parse_signal(text, event.chat_id, profile)
             if not formatted:
                 log.info(f"Rejecting message from {event.chat_id}: {snippet}")
+                self.stats.increment("rejected")
+                self.stats.record(snippet, "rejected", "parse")
                 return
 
+            self.stats.increment("parsed")
             dests, template = self.resolve_targets(event.chat_id)
             if template:
                 try:
@@ -1108,10 +1155,12 @@ class SignalBot:
                 except Exception as tmpl_err:
                     log.error(f"Template render failed for {template}: {tmpl_err}")
 
+            sent_any = False
             for dest in dests:
                 try:
                     await self.client.send_message(dest, formatted)
                     log.info(f"SENT to {dest}")
+                    sent_any = True
                 except (ChatWriteForbiddenError, ChatAdminRequiredError) as e:
                     log.error(f"Send failed to {dest} (permissions): {e}")
                 except Exception as e:
@@ -1128,8 +1177,16 @@ class SignalBot:
                         else:
                             await self.client.send_message(dest, formatted)
                         log.info(f"COPIED to {dest}")
+                        sent_any = True
                     except Exception as copy_err:
                         log.error(f"Copy failed to {dest}: {copy_err}")
+
+            if sent_any:
+                self.stats.increment("sent")
+                self.stats.record(snippet, "sent")
+            else:
+                self.stats.increment("rejected")
+                self.stats.record(snippet, "rejected", "send")
 
             if self._callback:
                 try:

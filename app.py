@@ -429,6 +429,17 @@ def status():
     running = bool(bot_instance and bot_instance.is_running())
     return jsonify({"running": running})
 
+
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    stats = (
+        bot_instance.stats.snapshot()
+        if bot_instance
+        else {"received": 0, "filtered": 0, "parsed": 0, "sent": 0, "rejected": 0, "messages": []}
+    )
+    return render_template("dashboard.html", stats=stats)
+
 @app.route("/health")
 def health():
     return "OK", 200

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>داشبورد</h2>
+<div class="row" style="margin-bottom:12px;">
+  <span class="pill">Received: {{ stats.received }}</span>
+  <span class="pill">Filtered: {{ stats.filtered }}</span>
+  <span class="pill">Parsed: {{ stats.parsed }}</span>
+  <span class="pill">Sent: {{ stats.sent }}</span>
+  <span class="pill">Rejected: {{ stats.rejected }}</span>
+</div>
+<h3>آخرین پیام‌ها</h3>
+<ul>
+  {% for m in stats.messages %}
+  <li>{{ m.text }} - {{ m.status }}{% if m.reason %} ({{ m.reason }}){% endif %}</li>
+  {% else %}
+  <li>هیچ پیامی پردازش نشده.</li>
+  {% endfor %}
+</ul>
+{% endblock %}
