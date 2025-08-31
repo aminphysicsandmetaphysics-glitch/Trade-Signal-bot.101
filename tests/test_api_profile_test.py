@@ -1,15 +1,10 @@
-import os
 import importlib
 
-os.environ.setdefault("SESSION_SECRET", "test")
 
-from profiles import ProfileStore
-
-
-def test_api_profile_test_handles_missing_profile_options(tmp_path):
+def test_api_profile_test_handles_missing_profile_options(tmp_path, monkeypatch):
+    monkeypatch.setenv("SESSION_SECRET", "test")
+    monkeypatch.setenv("PROFILE_STORE_PATH", str(tmp_path / "profiles.json"))
     app_module = importlib.reload(importlib.import_module("app"))
-    app_module.profiles_store = ProfileStore(tmp_path / "profiles.json")
-    app_module._load_profiles_into_channel_profiles()
     app = app_module.app
     app.config["TESTING"] = True
     app.config["WTF_CSRF_ENABLED"] = False

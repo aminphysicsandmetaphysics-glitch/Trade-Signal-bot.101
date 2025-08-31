@@ -1,11 +1,12 @@
 import importlib
 
 
-def test_start_bot_invalid_api_id(monkeypatch):
+def test_start_bot_invalid_api_id(monkeypatch, tmp_path):
     """Posting to /start_bot with a non-int api_id returns 400 and flashes."""
     monkeypatch.setenv("SESSION_SECRET", "test")
     monkeypatch.setenv("ADMIN_USER", "u")
     monkeypatch.setenv("ADMIN_PASS", "p")
+    monkeypatch.setenv("PROFILE_STORE_PATH", str(tmp_path / "profiles.json"))
     app = importlib.reload(importlib.import_module("app"))
     app.app.config["WTF_CSRF_ENABLED"] = False
 

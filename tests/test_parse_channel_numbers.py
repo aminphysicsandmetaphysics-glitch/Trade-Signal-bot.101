@@ -3,10 +3,11 @@ import pytest
 
 
 @pytest.fixture
-def app_module(monkeypatch):
+def app_module(monkeypatch, tmp_path):
     monkeypatch.setenv("SESSION_SECRET", "test")
     monkeypatch.setenv("ADMIN_USER", "u")
     monkeypatch.setenv("ADMIN_PASS", "p")
+    monkeypatch.setenv("PROFILE_STORE_PATH", str(tmp_path / "profiles.json"))
     return importlib.reload(importlib.import_module("app"))
 
 
