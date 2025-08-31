@@ -157,10 +157,6 @@ def resolve_profile(chat_id: int) -> Dict[str, Any]:
     return CHANNEL_PROFILES.get(int(chat_id), {})
 
 
-def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", s).strip()
-
-
 def normalize_numbers(text: str) -> str:
     """Translate Persian/Arabic digits and separators to ASCII equivalents."""
     if not text:
