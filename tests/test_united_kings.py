@@ -19,7 +19,6 @@ EXPECTED = """\
 📊 #XAUUSD
 📉 Position: Buy
 ❗️ R/R : 1/1.5
-💲 Entry Price : 1900.0
 🎯 Entry Range : 1900 – 1910
 ✔️ TP1 : 1915
 ✔️ TP2 : 1920
