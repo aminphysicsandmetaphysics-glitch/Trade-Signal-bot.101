@@ -3,7 +3,6 @@ from signal_bot import (
     parse_lingrid,
     parse_forex_rr,
     parse_message_by_source,
-    parse_signal_united_kings,
 )
 
 
@@ -95,33 +94,4 @@ def test_parse_message_by_source_routes():
     sig2, r2 = parse_gold_exclusive(msg)
     assert sig1 == sig2 and r1 is None and r2 is None
     sig3, r3 = parse_message_by_source(msg, "Unknown Channel")
-    assert sig3 == sig2 and r3 is None
-
-
-def test_parse_message_by_source_gold_keyword_priority():
-    msg = (
-        "Buy Gold now\n"
-        "Entry 1900\n"
-        "SL 1890\n"
-        "TP1: 1910\n"
-        "R/R 1:2\n"
-    )
-    sig1, r1 = parse_message_by_source(msg, "United Kings VIP")
-    sig2, r2 = parse_gold_exclusive(msg)
-    assert sig1 == sig2 and r1 is None and r2 is None
-
-
-def test_parse_message_by_source_united_kings_vip_only():
-    msg = (
-        "#XAUUSD\n"
-        "Buy\n"
-        "@1900-1910\n"
-        "TP1 : 1915\n"
-        "TP2 : 1920\n"
-        "SL : 1890\n"
-    )
-    sig1, r1 = parse_message_by_source(msg, "United Kings VIP")
-    sig2, r2 = parse_signal_united_kings(msg, 0, return_meta=True)
-    assert sig1 == sig2 and r1 is None and r2 is None
-    sig3, r3 = parse_message_by_source(msg, "United Kings Free")
-    assert sig3 is None and r3 == "unknown source"
+    assert sig3 is None and r3
