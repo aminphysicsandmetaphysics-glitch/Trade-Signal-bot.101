@@ -887,7 +887,7 @@ class SignalBot:
             log.info("Connecting...")
             self.client = TelegramClient(StringSession(self.session_string), self.api_id, self.api_hash)
 
-            @self.client.on(events.NewMessage(chats=self.from_channels, incoming=True))
+            @self.client.on(events.NewMessage(chats=self.from_channels))
             async def handler(event):
                 await self._handle_new_message(event)
 
