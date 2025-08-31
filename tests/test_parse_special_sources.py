@@ -17,8 +17,7 @@ def _assert_common(sig, symbol, position, entry, tp, sl, rr):
 
 def test_parse_gold_exclusive_success():
     message = (
-        "#XAUUSD\n"
-        "Buy now\n"
+        "Buy Gold now\n"
         "Entry 1900\n"
         "SL 1890\n"
         "TP1: 1910\n"
@@ -34,7 +33,7 @@ def test_parse_gold_exclusive_success():
 
 
 def test_parse_gold_exclusive_failure():
-    message = "#XAUUSD\nBuy now\nSL 1890\nTP1: 1910"
+    message = "Buy Gold now\nSL 1890\nTP1: 1910"
     sig, reason = parse_gold_exclusive(message)
     assert sig is None
     assert reason
@@ -89,7 +88,7 @@ def test_parse_forex_rr_failure():
 
 
 def test_parse_message_by_source_routes():
-    msg = "#XAUUSD\nBuy\nEntry ۱۹۰۰\nSL ۱۸۹۰\nTP ۱۹۱۰\nRR ۱:۲\nactivated"
+    msg = "Buy Gold\nEntry ۱۹۰۰\nSL ۱۸۹۰\nTP ۱۹۱۰\nRR ۱:۲\nactivated"
     sig1, r1 = parse_message_by_source(msg, "Gold Exclusive")
     sig2, r2 = parse_gold_exclusive(msg)
     assert sig1 == sig2 and r1 is None and r2 is None
