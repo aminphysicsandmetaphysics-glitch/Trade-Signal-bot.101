@@ -143,10 +143,10 @@ def start_bot():
     bot_instance = SignalBot(
         api_id=int(cfg.get("api_id")),
         api_hash=cfg.get("api_hash"),
-        string_session=cfg.get("session_string") or "",
-        sources=from_channels,
-        sink=to_channels,
-        skip_rr_for=skip_rr,
+        session_string=cfg.get("session_string") or "",
+        from_channels=from_channels,
+        to_channels=to_channels,
+        skip_rr_chat_ids=skip_rr,
     )
     t = Thread(target=bot_instance.start, daemon=True)
     t.start()
@@ -157,7 +157,7 @@ def start_bot():
 @app.route("/stop_bot", methods=["POST"])
 def stop_bot():
     global bot_instance
-    if bot_instance and bot_instance.running:
+    if bot_instance and bot_instance.is_running():
         bot_instance.stop()
         flash("Bot stopped.", "success")
     else:
@@ -167,7 +167,7 @@ def stop_bot():
 
 @app.route("/status")
 def status():
-    running = bool(bot_instance and bot_instance.running)
+    running = bool(bot_instance and bot_instance.is_running())
     return jsonify({"running": running})
 
 @app.route("/health")
