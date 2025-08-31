@@ -241,6 +241,14 @@ TP_VALUE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Direction synonyms used across parsers
+BUY_SYNONYMS = re.compile(
+    r"\b(?:buy|long|go\s+long|grab\s+long)\b", re.IGNORECASE
+)
+SELL_SYNONYMS = re.compile(
+    r"\b(?:sell|short|go\s+short|offload)\b", re.IGNORECASE
+)
+
 # Special-case parsing for the "United Kings" channels
 # (IDs taken from known public channels)
 UNITED_KINGS_CHAT_IDS = {
@@ -249,8 +257,6 @@ UNITED_KINGS_CHAT_IDS = {
 }
 
 # United Kings specific regex patterns
-UK_BUY_RE = re.compile(r"\b(?:buy|long)\b", re.IGNORECASE)
-UK_SELL_RE = re.compile(r"\b(?:sell|short)\b", re.IGNORECASE)
 # Entry is provided as a range separated by a dash ("@" optional, various unicode dashes)
 UK_RANGE_RE = re.compile(
     r"@?\s*(-?\d+(?:\.\d+)?)\s*[-\u2010-\u2015]\s*(-?\d+(?:\.\d+)?)"
@@ -332,9 +338,9 @@ def guess_position(text: str) -> Optional[str]:
     for raw, norm in POS_VARIANTS:
         if raw in up:
             return norm
-    if re.search(r"\bBUY\b", up):
+    if BUY_SYNONYMS.search(text or ""):
         return "Buy"
-    if re.search(r"\bSELL\b", up):
+    if SELL_SYNONYMS.search(text or ""):
         return "Sell"
     return None
 
@@ -745,9 +751,9 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     symbol = normalize_symbol("XAUUSD")
 
     position = ""
-    if any(UK_BUY_RE.search(l) for l in lines):
+    if any(BUY_SYNONYMS.search(l) for l in lines):
         position = "Buy"
-    elif any(UK_SELL_RE.search(l) for l in lines):
+    elif any(SELL_SYNONYMS.search(l) for l in lines):
         position = "Sell"
 
     if not position:
