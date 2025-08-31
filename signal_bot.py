@@ -142,7 +142,7 @@ NON_SIGNAL_HINTS = [
 ]
 
 # Lines that are purely visual dividers ("----", "====", etc.)
-DIVIDER_RE = re.compile(r"^[-_=*~\u2013\u2014\s]{3,}$")
+DIVIDER_LINE_RE = re.compile(r"^[\s\-\–\—\_\=\·\.\•\*➖]+$")
 
 TP_KEYS = ["tp", "take profit", "take-profit", "t/p", "t p"]
 SL_KEYS = ["sl", "stop loss", "stop-loss", "s/l", "s l"]
@@ -403,25 +403,41 @@ def looks_like_noise_or_update(text: str) -> bool:
     return looks_like_update(text)
 
 
-def _strip_noise_lines(text: str) -> str:
-    """Remove divider and boilerplate lines from *text*.
+def _strip_noise_lines(lines: list[str]) -> list[str]:
+    """Normalize and remove boilerplate from *lines*.
 
-    Lines containing known ``NON_SIGNAL_HINTS`` or consisting solely of divider
-    characters are stripped.  Remaining lines are joined with newlines and
-    returned.
+    Each line is stripped of surrounding whitespace. Blank lines, visual
+    divider lines and a few known header phrases are removed. Lines that do not
+    mention an entry ``@`` or the tokens ``SL``/``TP`` and also don't look like
+    core signal information (symbols, positions or numeric data) are considered
+    advisory and dropped. Remaining lines are returned.
     """
 
     cleaned: List[str] = []
-    for raw in (text or "").splitlines():
+    for raw in lines:
         raw = raw.strip()
         if not raw:
             continue
-        if DIVIDER_RE.fullmatch(raw):
+        if DIVIDER_LINE_RE.fullmatch(raw):
             continue
-        if any(h in raw.lower() for h in NON_SIGNAL_HINTS):
+        low = raw.lower()
+        if low.startswith("trade alert"):
             continue
+        if low.startswith("alright united kings"):
+            continue
+        if low.startswith("tyler here"):
+            continue
+
+        if "@" not in raw and "sl" not in low and "tp" not in low:
+            if NUM_RE.search(raw) or raw.startswith("#") or re.search(
+                r"\b(buy|sell|entry|position)\b", low
+            ):
+                cleaned.append(raw)
+            continue
+
         cleaned.append(raw)
-    return "\n".join(cleaned)
+
+    return cleaned
 
 
 def is_valid(signal: Dict) -> bool:
@@ -558,7 +574,12 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
         s = f"{x:.5f}".rstrip("0").rstrip(".")
         return s
 
-    entry = _fmt(lo)
+    range_str = m.group(0)
+    if "@" in range_str:
+        entry = _fmt(lo)
+    else:
+        mid = (lo + hi) / 2
+        entry = _fmt(mid)
     entry_range = [_fmt(lo), _fmt(hi)]
 
     # SL
@@ -625,8 +646,8 @@ def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
     if looks_like_update(text):
         log.info("IGNORED (update/noise)")
         return None
-
-    lines = [l.strip() for l in (text or "").splitlines() if l and l.strip()]
+    lines = _strip_noise_lines((text or "").splitlines())
+    text = "\n".join(lines)
     if not lines:
         log.info("IGNORED (empty)")
         return None
@@ -687,7 +708,8 @@ def parse_signal(
 ) -> Optional[str]:
     profile = profile or {}
     text = normalize_numbers(text)
-    text = _strip_noise_lines(text)
+    lines = _strip_noise_lines((text or "").splitlines())
+    text = "\n".join(lines)
     if not text:
         log.info("IGNORED (empty)")
         return None
@@ -705,7 +727,6 @@ def parse_signal(
         log.info("IGNORED (update/noise)")
         return None
 
-    lines = [l.strip() for l in (text or "").splitlines() if l and l.strip()]
     if not lines:
         log.info("IGNORED (empty)")
         return None
