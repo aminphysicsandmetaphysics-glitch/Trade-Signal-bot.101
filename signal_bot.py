@@ -10,10 +10,24 @@ back to copying the text and any attached media.
 
 from __future__ import annotations
 
+import sys, logging, os
+
+
+def setup_logging():
+    level = os.getenv("LOG_LEVEL", "INFO").upper()
+    root = logging.getLogger()
+    if not root.handlers:
+        h = logging.StreamHandler(sys.stdout)
+        h.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+        root.addHandler(h)
+    root.setLevel(level)
+
+
+setup_logging()
+log = logging.getLogger("signal_bot")
+
 import asyncio
-import logging
 import re
-import os
 import hashlib
 import time
 from datetime import datetime, timezone, timedelta
@@ -27,12 +41,6 @@ from telethon.errors import (
     ChatWriteForbiddenError,
 )
 from telethon.sessions import StringSession
-
-# ----------------------------------------------------------------------------
-# Logging
-# ----------------------------------------------------------------------------
-log = logging.getLogger("signal_bot")
-log.setLevel(logging.INFO)
 
 # ----------------------------------------------------------------------------
 # Signal parsing (REPLACED / IMPROVED)
@@ -689,20 +697,19 @@ class SignalBot:
 
 
     # Start (with auto-reconnect loop)
-    def start(self):
+    async def _run(self):
         if self._running:
             log.info("Bot already running.")
             return
         if not self.session_string:
             log.error("Session string is missing; cannot start bot.")
             return
-    
+
         self._running = True
         attempts = 0
 
         while self._running:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            log.info("Connecting...")
             self.client = TelegramClient(StringSession(self.session_string), self.api_id, self.api_hash)
 
             @self.client.on(events.NewMessage(chats=self.from_channels, incoming=True))
@@ -713,7 +720,7 @@ class SignalBot:
                     text = normalize_numbers(text)
                     snippet = text[:160].replace("\n", " ")
                     log.info(f"MSG from {event.chat_id}: {snippet} ...")
-                    
+
                     if not self._fresh_enough(getattr(event.message, "date", self.startup_time)):
                         return
 
@@ -755,7 +762,6 @@ class SignalBot:
                 except Exception as e:
                     log.error(f"Handler error: {e}")
 
-            log.info("Starting Telegram client...")
             try:
                 self.client.start()
 
@@ -781,12 +787,12 @@ class SignalBot:
                         except Exception as e:
                             log.error(f"Cannot access destination '{dest}': {e}")
 
-                self.client.loop.run_until_complete(_verify())
+                await _verify()
 
-                log.info("Client started. Waiting for messages...")
+                log.info("Bot is up...")
                 while self._running:
                     try:
-                        self.client.run_until_disconnected()
+                        await asyncio.to_thread(self.client.run_until_disconnected)
                     except (ConnectionError, asyncio.TimeoutError):
                         async def _reconnect():
                             retries = 0
@@ -800,7 +806,7 @@ class SignalBot:
                                         return False
                                     await asyncio.sleep(self.retry_delay)
 
-                        if not self.client.loop.run_until_complete(_reconnect()):
+                        if not await _reconnect():
                             log.error("Reconnection attempts failed. Will retry.")
                             break
                         else:
@@ -811,22 +817,15 @@ class SignalBot:
                     else:
                         log.info("Stop requested. Exiting run loop.")
                         break
-                        
             except Exception as e:
                 log.error(f"Client error: {e}")
             finally:
                 if self.client:
                     try:
-                        # Only disconnect here if stop() hasn't already done so via
-                        # asyncio.run_coroutine_threadsafe.
-                        if (
-                            self._running
-                            and self.client.loop.run_until_complete(self.client.is_connected())
-                        ):
-                            self.client.loop.run_until_complete(self.client.disconnect())
+                        if self._running and await self.client.is_connected():
+                            await self.client.disconnect()
                     except Exception:
                         pass
-                loop.close()
 
             if not self._running:
                 break
@@ -838,9 +837,21 @@ class SignalBot:
                 break
 
             log.info(f"Reconnecting in {self.retry_delay} seconds...")
-            time.sleep(self.retry_delay)
+            await asyncio.sleep(self.retry_delay)
 
         self._running = False
+
+    def start(self):
+        if self._running:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._run())
+            log.info("SignalBot started as background task (web runtime).")
+        except RuntimeError:
+            log.info("SignalBot running standalone event loop.")
+            asyncio.run(self._run())
+        self._running = True
 
 
 # ------------------------------------------------------------------------------
