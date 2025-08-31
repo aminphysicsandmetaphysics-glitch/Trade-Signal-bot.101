@@ -25,14 +25,14 @@ NOISE_MESSAGES = [
 
 @pytest.mark.parametrize("message,expected", VALID_SIGNALS)
 def test_parse_united_kings_valid(message, expected):
-    assert parse_signal(message, 1234) == expected
+    assert parse_signal(message, 1234, {}) == expected
 
 
 @pytest.mark.parametrize("message", INVALID_SIGNALS)
 def test_parse_united_kings_invalid(message):
-    assert parse_signal(message, 1234) is None
+    assert parse_signal(message, 1234, {}) is None
 
 
 @pytest.mark.parametrize("message", NOISE_MESSAGES)
 def test_parse_united_kings_noise(message):
-    assert parse_signal(message, 1234) is None
+    assert parse_signal(message, 1234, {}) is None
