@@ -234,8 +234,13 @@ EMOJI_RE = re.compile(
 DIVIDER_LINE_RE = re.compile(r"^[\s\-\–\—\_\=\·\.\•\*➖]+$")
 
 TP_KEYS = ["tp", "take profit", "take-profit", "t/p", "t p"]
-SL_KEYS = ["sl", "stop loss", "stop-loss", "s/l", "s l"]
 ENTRY_KEYS = ["entry price", "entry", "e:"]
+
+# الگوی استخراج عدد پس از SL یا Stop Loss
+SL_VALUE_RE = re.compile(
+    r"\b(?:SL|Stop[-\s]*Loss)\s*[:\-]?\s*(-?\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
 
 # Explicit TP/Target line detector and numeric extractor excluding unit-suffixed numbers
 TP_LINE_RE = re.compile(r"\b(?:tp\d*|target)\b", re.IGNORECASE)
@@ -390,11 +395,17 @@ extract_entry = classic_extract_entry
 
 
 def extract_sl(lines: List[str]) -> Optional[str]:
+    """Extract the stop loss value from signal lines.
+
+    Only numbers that immediately follow an ``SL`` or ``Stop Loss`` keyword
+    are considered. Lines containing the keyword without a subsequent number
+    are ignored to avoid accidentally capturing unrelated numeric values.
+    """
+
     for l in lines:
-        if any(k in l.lower() for k in SL_KEYS):
-            m = NUM_RE.search(l)
-            if m:
-                return m.group(1)
+        m = SL_VALUE_RE.search(l)
+        if m:
+            return m.group(1)
     return None
 
 
