@@ -632,6 +632,7 @@ class SignalBot:
         self._callback: Optional[Callable[[dict], None]] = None
         self.retry_delay = retry_delay
         self.max_retries = max_retries
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
         
         # freshness/dedupe state
         self.startup_time = datetime.now(timezone.utc)
@@ -854,11 +855,18 @@ class SignalBot:
             return
         try:
             loop = asyncio.get_running_loop()
+            self.loop = loop
             loop.create_task(self._run())
             log.info("SignalBot started as background task (web runtime).")
         except RuntimeError:
             log.info("SignalBot running standalone event loop.")
-            asyncio.run(self._run())
+            loop = asyncio.new_event_loop()
+            self.loop = loop
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self._run())
+            finally:
+                loop.close()
 
 
 # ------------------------------------------------------------------------------

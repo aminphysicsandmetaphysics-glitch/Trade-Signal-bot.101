@@ -162,7 +162,7 @@ def start_bot():
 def stop_bot():
     global bot_instance
     if bot_instance and bot_instance.is_running():
-        asyncio.run(bot_instance.stop())
+        asyncio.run_coroutine_threadsafe(bot_instance.stop(), bot_instance.loop)
         flash("Bot stopped.", "success")
     else:
         flash("Bot is not running.", "warning")
