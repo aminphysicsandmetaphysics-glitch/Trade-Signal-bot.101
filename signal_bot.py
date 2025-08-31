@@ -105,6 +105,17 @@ UK_NOISE_LINES = [
     re.compile(r"result", re.IGNORECASE),
 ]
 
+# General entry range detector
+ENTRY_RANGE_RE = re.compile(r"(-?\d+(?:\.\d+)?)[^0-9]+(-?\d+(?:\.\d+)?)")
+
+# Mapping of chat IDs to profile options controlling parsing behaviour.
+CHANNEL_PROFILES: Dict[int, Dict[str, Any]] = {}
+
+
+def resolve_profile(chat_id: int) -> Dict[str, Any]:
+    """Return the profile dict associated with a chat ID."""
+    return CHANNEL_PROFILES.get(int(chat_id), {})
+
 
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
@@ -256,6 +267,14 @@ def is_valid(signal: Dict) -> bool:
         signal.get("entry"),
         signal.get("sl"),
     ]) and len(signal.get("tps", [])) >= 1
+
+
+def has_entry_range(lines: List[str]) -> bool:
+    """Detect whether any line contains an entry range."""
+    for l in lines:
+        if "entry" in l.lower() and ENTRY_RANGE_RE.search(l):
+            return True
+    return False
 
 
 def to_unified(signal: Dict, chat_id: int, extra: Optional[Dict] = None) -> str:
@@ -491,7 +510,8 @@ def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
 
     return to_unified(signal, chat_id, signal.get("extra", {}))
 
-def parse_signal(text: str, chat_id: int) -> Optional[str]:
+def parse_signal(text: str, chat_id: int, profile: Dict[str, Any]) -> Optional[str]:
+    profile = profile or {}
     text = normalize_numbers(text)
     # Special-case: United Kings parser
     if chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text):
@@ -511,6 +531,18 @@ def parse_signal(text: str, chat_id: int) -> Optional[str]:
     if not lines:
         log.info("IGNORED (empty)")
         return None
+
+    if has_entry_range(lines):
+        if profile.get("allow_entry_range"):
+            try:
+                res = parse_channel_four(text, chat_id)
+                if res is not None:
+                    return res
+            except Exception as e:
+                log.debug(f"Entry range parser failed: {e}")
+        else:
+            log.info("IGNORED (entry range not allowed)")
+            return None
 
     symbol = guess_symbol(text) or ""
     position = guess_position(text) or ""
@@ -803,7 +835,8 @@ class SignalBot:
                     if self._dedup_and_remember(int(event.chat_id), event.message):
                         return
 
-                    formatted = parse_signal(text, event.chat_id)
+                    profile = resolve_profile(int(event.chat_id))
+                    formatted = parse_signal(text, event.chat_id, profile)
                     if not formatted:
                         return
 
