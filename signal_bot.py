@@ -572,10 +572,11 @@ def _strip_noise_lines(lines: list[str]) -> list[str]:
 
 
 def is_valid(signal: Dict) -> bool:
+    entry_or_range = signal.get("entry") or signal.get("extra", {}).get("entries", {}).get("range")
     return all([
         signal.get("symbol"),
         signal.get("position"),
-        signal.get("entry"),
+        entry_or_range,
         signal.get("sl"),
     ]) and len(signal.get("tps", [])) >= 1
 
@@ -755,8 +756,11 @@ def _validate_tp_sl(
             if all(tv < (hi if entry_range else e) for tv in tp_vals):
                 log.info(f"IGNORED (buy but all TP < entry {entry})")
                 return False
-            if entry_range and (any(lo <= tv <= hi for tv in tp_vals) or lo <= sl_v <= hi):
+            if entry_range and (
+                any(lo <= tv <= hi for tv in tp_vals) or lo < sl_v < hi
+            ):
                 log.warning("TP/SL inside entry range")
+                return False
         elif pos.startswith("SELL"):
             boundary = lo if entry_range else e
             if sl_v <= boundary:
@@ -768,8 +772,11 @@ def _validate_tp_sl(
             if all(tv > boundary for tv in tp_vals):
                 log.info(f"IGNORED (sell but all TP > entry {entry})")
                 return False
-            if entry_range and (any(lo <= tv <= hi for tv in tp_vals) or lo <= sl_v <= hi):
+            if entry_range and (
+                any(lo <= tv <= hi for tv in tp_vals) or lo < sl_v < hi
+            ):
                 log.warning("TP/SL inside entry range")
+                return False
     except Exception:
         pass
     return True
@@ -838,10 +845,10 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
 
     range_str = m.group(0)
     if "@" in range_str:
-        entry = f"{lo}"
+        calc_entry = f"{lo}"
     else:
         mid = (lo + hi) / 2
-        entry = _fmt(mid)
+        calc_entry = _fmt(mid)
     entry_range = [_fmt(lo), _fmt(hi)]
 
     # SL
@@ -867,13 +874,16 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
 
     rr = extract_rr(text)
     if not rr:
-        rr = calculate_rr(entry, sl, tps[0])
+        rr = calculate_rr(calc_entry, sl, tps[0])
 
-    extra = {"entries": {"range": entry_range}}
+    extra = {
+        "entries": {"range": entry_range},
+        "show_entry_range_only": True,
+    }
     signal = {
         "symbol": symbol,
         "position": position,
-        "entry": entry,
+        "entry": None,
         "sl": sl,
         "tps": tps,
         "rr": rr,
@@ -884,7 +894,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
         return None, "invalid"
     if not validate_directional_consistency(signal):
         return None, "invalid"
-    if not _validate_tp_sl(position, entry, sl, tps, tuple(entry_range)):
+    if not _validate_tp_sl(position, calc_entry, sl, tps, tuple(entry_range)):
         return None, "invalid"
 
     return to_unified(signal, chat_id, extra), None
