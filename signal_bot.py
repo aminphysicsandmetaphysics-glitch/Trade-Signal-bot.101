@@ -571,6 +571,62 @@ def _looks_like_united_kings(text: str) -> bool:
     return True
 
 
+def _validate_tp_sl(
+    position: str,
+    entry: str,
+    sl: str,
+    tps: List[str],
+    entry_range: Optional[Tuple[str, str]] = None,
+) -> bool:
+    """Return True if TP/SL values are consistent with *entry*.
+
+    For ``BUY`` positions the stop loss must be below the entry price and at
+    least one take-profit target must be above it.  ``SELL`` signals require the
+    opposite.  When an ``entry_range`` is supplied, the lower bound is used for
+    stop-loss validation and the upper bound for take-profit checks.  A warning
+    is emitted if any TP or SL falls *within* the provided range, as this often
+    indicates an inconsistent signal.
+    """
+
+    try:
+        e = float(entry)
+        sl_v = float(sl)
+        tp_vals = [float(tp) for tp in tps]
+        lo, hi = e, e
+        if entry_range:
+            lo, hi = sorted(float(x) for x in entry_range)
+
+        pos = position.upper()
+        if pos.startswith("BUY"):
+            if sl_v >= lo:
+                log.info(f"IGNORED (buy but SL {sl} >= entry {entry})")
+                return False
+            if any(tv < lo for tv in tp_vals):
+                log.info(f"IGNORED (buy but TP {tp_vals[0]} < entry {entry})")
+                return False
+            if all(tv < (hi if entry_range else e) for tv in tp_vals):
+                log.info(f"IGNORED (buy but all TP < entry {entry})")
+                return False
+            if entry_range and (any(lo <= tv <= hi for tv in tp_vals) or lo <= sl_v <= hi):
+                log.warning("TP/SL inside entry range")
+        elif pos.startswith("SELL"):
+            boundary = lo if entry_range else e
+            if sl_v <= boundary:
+                log.info(f"IGNORED (sell but SL {sl} <= entry {entry})")
+                return False
+            if any(tv > boundary for tv in tp_vals):
+                log.info(f"IGNORED (sell but TP {tp_vals[0]} > entry {entry})")
+                return False
+            if all(tv > boundary for tv in tp_vals):
+                log.info(f"IGNORED (sell but all TP > entry {entry})")
+                return False
+            if entry_range and (any(lo <= tv <= hi for tv in tp_vals) or lo <= sl_v <= hi):
+                log.warning("TP/SL inside entry range")
+    except Exception:
+        pass
+    return True
+
+
 def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     """Parse a United Kings style signal.
 
@@ -679,20 +735,8 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     if not is_valid(signal):
         log.info(f"IGNORED (invalid) -> {signal}")
         return None
-
-    # sanity check: ensure TPs are in correct direction relative to entry
-    try:
-        e = float(entry)
-        for tp in tps:
-            tv = float(tp)
-            if position.upper().startswith("SELL") and tv > e:
-                log.info(f"IGNORED (sell but TP {tp} > entry {entry})")
-                return None
-            if position.upper().startswith("BUY") and tv < e:
-                log.info(f"IGNORED (buy but TP {tp} < entry {entry})")
-                return None
-    except Exception:
-        pass
+    if not _validate_tp_sl(position, entry, sl, tps, tuple(entry_range)):
+        return None
 
     return to_unified(signal, chat_id, extra)
 
@@ -743,19 +787,8 @@ def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
     if not is_valid(signal):
         log.info(f"IGNORED (invalid) -> {signal}")
         return None
-
-    try:
-        e = float(entry)
-        for tp in tps:
-            tv = float(tp)
-            if position.upper().startswith("SELL") and tv > e:
-                log.info(f"IGNORED (sell but TP {tp} > entry {entry})")
-                return None
-            if position.upper().startswith("BUY") and tv < e:
-                log.info(f"IGNORED (buy but TP {tp} < entry {entry})")
-                return None
-    except Exception:
-        pass
+    if not _validate_tp_sl(position, entry, sl, tps, entry_range):
+        return None
 
     return to_unified(signal, chat_id, signal.get("extra", {}))
 
@@ -792,11 +825,10 @@ def parse_signal(
     if _has_entry_range(text):
         if profile.get("allow_entry_range"):
             try:
-                res = parse_channel_four(text, chat_id)
-                if res is not None:
-                    return res
+                return parse_channel_four(text, chat_id)
             except Exception as e:
                 log.debug(f"Entry range parser failed: {e}")
+                return None
         else:
             log.info("IGNORED (entry range not allowed)")
             return None
@@ -823,19 +855,8 @@ def parse_signal(
         log.info(f"IGNORED (invalid) -> {signal}")
         return None
 
-    # sanity check: جهت TPها با Entry همخوان باشد
-    try:
-        e = float(entry)
-        for tp in tps:
-            tv = float(tp)
-            if position.upper().startswith("SELL") and tv > e:
-                log.info(f"IGNORED (sell but TP {tp} > entry {entry})")
-                return None
-            if position.upper().startswith("BUY") and tv < e:
-                log.info(f"IGNORED (buy but TP {tp} < entry {entry})")
-                return None
-    except Exception:
-        pass
+    if not _validate_tp_sl(position, entry, sl, tps):
+        return None
 
     return to_unified(signal, chat_id, signal.get("extra", {}))
 
