@@ -2,7 +2,10 @@ import pytest
 from signal_bot import parse_signal, CHANNEL_PROFILES
 
 
-MESSAGE_WITH_RANGE = """#XAUUSD\nSell Limit\nEntry Range: 1930 - 1935\nTP1: 1920\nSL: 1940\n"""
+MESSAGE_WITH_RANGE = (
+    "#XAUUSD\nSell Limit\nEntry: @1930 - 1935\n"
+    "Take Profit 1: 1920\nStop Loss: 1940\n"
+)
 
 MESSAGE_NO_RANGE = """#BTCUSD\nBuy\nEntry: 100\nTP1: 110\nSL: 90\n"""
 

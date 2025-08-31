@@ -144,8 +144,8 @@ UK_NOISE_LINES = [
     re.compile(r"result", re.IGNORECASE),
 ]
 
-# General entry range detector
-ENTRY_RANGE_RE = re.compile(r"(-?\d+(?:\.\d+)?)[^0-9]+(-?\d+(?:\.\d+)?)")
+# Entry range detector used to spot patterns like '@1234-1250'
+ENTRY_RANGE_RE = re.compile(r"@\s*\d+(?:\.\d+)?\s*[-–]\s*\d+(?:\.\d+)?")
 
 # Mapping of chat IDs to profile options controlling parsing behaviour.
 # Example: {1234: {"allow_entry_range": True, "show_entry_range_only": True}}
@@ -394,12 +394,9 @@ def is_valid(signal: Dict) -> bool:
     ]) and len(signal.get("tps", [])) >= 1
 
 
-def has_entry_range(lines: List[str]) -> bool:
-    """Detect whether any line contains an entry range."""
-    for l in lines:
-        if "entry" in l.lower() and ENTRY_RANGE_RE.search(l):
-            return True
-    return False
+def _has_entry_range(text: str) -> bool:
+    """Return True if ``text`` contains an entry range like ``@1234-1250``."""
+    return bool(ENTRY_RANGE_RE.search(text))
 
 
 def to_unified(signal: Dict, chat_id: int, extra: Optional[Dict] = None) -> str:
@@ -674,7 +671,7 @@ def parse_signal(
         log.info("IGNORED (empty)")
         return None
 
-    if has_entry_range(lines):
+    if _has_entry_range(text):
         if profile.get("allow_entry_range"):
             try:
                 res = parse_channel_four(text, chat_id)
