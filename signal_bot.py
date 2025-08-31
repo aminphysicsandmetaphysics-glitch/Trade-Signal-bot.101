@@ -631,7 +631,9 @@ def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
 
     return to_unified(signal, chat_id, signal.get("extra", {}))
 
-def parse_signal(text: str, chat_id: int, profile: Dict[str, Any]) -> Optional[str]:
+def parse_signal(
+    text: str, chat_id: int, profile: Dict[str, Any] | None = None
+) -> Optional[str]:
     profile = profile or {}
     text = normalize_numbers(text)
     # Special-case: United Kings parser

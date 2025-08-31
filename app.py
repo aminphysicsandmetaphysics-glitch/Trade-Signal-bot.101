@@ -298,7 +298,7 @@ def api_profile_test(name: str):
         except Exception:
             chat_id = 0
 
-    result = parse_signal(message, chat_id)
+    result = parse_signal(message, chat_id, profile.get("parse_options"))
     return jsonify({"parsed": result})
 
 
