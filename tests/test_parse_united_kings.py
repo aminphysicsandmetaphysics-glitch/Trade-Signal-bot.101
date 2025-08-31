@@ -13,12 +13,12 @@ VALID_SIGNALS = [
     (
         """#XAUUSD\nBuy gold\n@1900-1910\nTP1 : 1915\nTP2 : 1920\nSL : 1890\n""",
         """\
-📊 #XAUUSD\n📉 Position: Buy\n❗️ R/R : 1/1.5\n💲 Entry Price : 1900.0\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1915\n✔️ TP2 : 1920\n🚫 Stop Loss : 1890""",
+📊 #XAUUSD\n📉 Position: Buy Limit\n❗️ R/R : 1/1.5\n💲 Entry Price : 1900.0\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1915\n✔️ TP2 : 1920\n🚫 Stop Loss : 1890""",
     ),
     (
         """#XAUUSD\nSell gold\n@1900-1910\nTP1 : 1890\nTP2 : 1880\nSL : 1910\n""",
         """\
-📊 #XAUUSD\n📉 Position: Sell\n❗️ R/R : 1/1\n💲 Entry Price : 1900.0\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1890\n✔️ TP2 : 1880\n🚫 Stop Loss : 1910""",
+📊 #XAUUSD\n📉 Position: Sell Limit\n❗️ R/R : 1/1\n💲 Entry Price : 1900.0\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1890\n✔️ TP2 : 1880\n🚫 Stop Loss : 1910""",
     ),
 ]
 
@@ -104,49 +104,49 @@ def test_united_kings_missing_position_logged(caplog):
 def test_united_kings_buy_synonym_grab():
     message = """#XAUUSD\ngrab\n@1900-1910\nTP1 : 1915\nSL : 1890\n"""
     result, reason = parse_signal_united_kings(message, 1234)
-    assert result and "Position: Buy" in result
+    assert result and "Position: Buy Limit" in result
     assert reason is None
 
 
 def test_united_kings_buy_synonym_purchase():
     message = """#XAUUSD\npurchase\n@1900-1910\nTP1 : 1915\nSL : 1890\n"""
     result, reason = parse_signal_united_kings(message, 1234)
-    assert result and "Position: Buy" in result
+    assert result and "Position: Buy Limit" in result
     assert reason is None
 
 
 def test_united_kings_sell_synonym_offload():
     message = """#XAUUSD\noffload\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
     result, reason = parse_signal_united_kings(message, 1234)
-    assert result and "Position: Sell" in result
+    assert result and "Position: Sell Limit" in result
     assert reason is None
 
 
 def test_united_kings_sell_synonym_unload():
     message = """#XAUUSD\nunload\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
     result, reason = parse_signal_united_kings(message, 1234)
-    assert result and "Position: Sell" in result
+    assert result and "Position: Sell Limit" in result
     assert reason is None
 
 
 def test_united_kings_sell_synonym_dump():
     message = """#XAUUSD\ndump\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
     result, reason = parse_signal_united_kings(message, 1234)
-    assert result and "Position: Sell" in result
+    assert result and "Position: Sell Limit" in result
     assert reason is None
 
 
 def test_united_kings_sell_phrase_were_selling():
     message = """#XAUUSD\nwe’re selling\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
     result, reason = parse_signal_united_kings(message, 1234)
-    assert result and "Position: Sell" in result
+    assert result and "Position: Sell Limit" in result
     assert reason is None
 
 
 def test_united_kings_sell_synonym_ditch():
     message = """#XAUUSD\nditch\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
     result, reason = parse_signal_united_kings(message, 1234)
-    assert result and "Position: Sell" in result
+    assert result and "Position: Sell Limit" in result
     assert reason is None
 
 
