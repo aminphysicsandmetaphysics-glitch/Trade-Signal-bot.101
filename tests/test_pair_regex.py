@@ -1,6 +1,6 @@
 import pytest
 
-from signal_bot import guess_symbol
+from signal_bot import guess_symbol, strip_invisibles
 
 @pytest.mark.parametrize("text", ["UNITED", "ALRIGHT"])
 def test_invalid_words_not_matched(text):
@@ -30,8 +30,9 @@ def test_symbol_aliases(text, expected):
         ("🔥# EURUSD moon", "EURUSD"),
         ("#GBP\u00a0USD", "GBPUSD"),
         ("#EUR\u200fUSD", "EURUSD"),
+        ("\u2066🪙#USDJPY🪙\u2069", "USDJPY"),
     ],
 )
 def test_hashtags_with_emoji_or_invisible(text, expected):
-    assert guess_symbol(text) == expected
+    assert guess_symbol(strip_invisibles(text)) == expected
 

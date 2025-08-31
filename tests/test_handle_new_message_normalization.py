@@ -50,6 +50,29 @@ def test_handle_new_message_normalizes_once(monkeypatch):
     assert calls == ["۱۲۳۴"]
 
 
+def test_handle_new_message_strips_invisibles_and_emojis(monkeypatch):
+    bot = SignalBot(1, "hash", "sess", [], [])
+
+    captured = {}
+
+    def fake_parse_signal(text, chat_id, profile, *, return_meta=True):
+        cleaned = signal_bot.strip_invisibles(signal_bot.normalize_numbers(text))
+        captured["text"] = cleaned
+        return cleaned, {"symbol": "", "position": ""}
+
+    monkeypatch.setattr(signal_bot, "parse_signal", fake_parse_signal)
+
+    text = "\u2066🔥#EURUSD🔥\u2069"
+    event = DummyEvent(123, text)
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(bot._handle_new_message(event))
+    finally:
+        loop.close()
+
+    assert captured["text"] == "#EURUSD"
+
+
 def test_handle_new_message_handles_malformed_parse(monkeypatch, caplog):
     bot = SignalBot(1, "hash", "sess", [], [])
 
