@@ -30,7 +30,8 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import secrets
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from signal_bot import SignalBot, parse_signal
+from signal_bot import SignalBot, parse_signal, CHANNEL_PROFILES
+from profiles import ChannelProfile, ProfileStore
 
 
 # ----------------------------------------------------------------------------
@@ -89,10 +90,49 @@ config_store = {
     "to_channels": os.environ.get("DESTS", ""),
 }
 
-# Profiles are stored in-memory and can be managed via REST APIs.
-# Each profile is keyed by a unique ``name`` and stores channel lists
-# along with optional parsing options.
-profiles_store: dict[str, dict] = {}
+# Profiles are persisted to disk using :class:`ProfileStore`.  Each
+# profile is keyed by a unique ``name`` and stores channel lists along
+# with optional parsing options.
+profiles_store = ProfileStore("profiles.json")
+
+
+def _profile_to_dict(profile: ChannelProfile) -> dict:
+    """Convert a :class:`ChannelProfile` into the API/templating dict."""
+    return {
+        "name": profile.id,
+        "from_channels": profile.member_channels,
+        "to_channels": profile.destinations,
+        "parse_options": profile.parse_options,
+    }
+
+
+def _update_channel_profiles(profile: ChannelProfile) -> None:
+    """Populate ``CHANNEL_PROFILES`` for the channels in *profile*."""
+    opts = profile.parse_options or {}
+    for ch in profile.member_channels:
+        try:
+            CHANNEL_PROFILES[int(ch)] = opts
+        except Exception:
+            continue
+
+
+def _remove_channel_profiles(profile: ChannelProfile) -> None:
+    """Remove channel mappings for *profile* from ``CHANNEL_PROFILES``."""
+    for ch in profile.member_channels:
+        try:
+            CHANNEL_PROFILES.pop(int(ch), None)
+        except Exception:
+            continue
+
+
+def _load_profiles_into_channel_profiles() -> None:
+    """Load all profiles and populate ``CHANNEL_PROFILES`` accordingly."""
+    CHANNEL_PROFILES.clear()
+    for p in profiles_store.list_profiles().values():
+        _update_channel_profiles(p)
+
+
+_load_profiles_into_channel_profiles()
 
 
 # ----------------------------------------------------------------------------
@@ -202,7 +242,8 @@ def index():
 @login_required
 def profiles_page():
     """Render a simple listing of available profiles."""
-    return render_template("profiles.html", profiles=profiles_store)
+    profiles = {p.id: _profile_to_dict(p) for p in profiles_store.list_profiles().values()}
+    return render_template("profiles.html", profiles=profiles)
 
 
 @app.route("/profiles/new", methods=["GET"])
@@ -216,11 +257,11 @@ def new_profile_page():
 @login_required
 def edit_profile_page(name: str):
     """Render form for editing an existing profile."""
-    profile = profiles_store.get(name)
+    profile = profiles_store.get_profile(name)
     if not profile:
         flash("Profile not found.", "error")
         return redirect(url_for("profiles_page"))
-    return render_template("profile.html", profile=profile)
+    return render_template("profile.html", profile=_profile_to_dict(profile))
 
 
 # -----------------------------------------------------------------------------
@@ -233,56 +274,62 @@ def edit_profile_page(name: str):
 def api_profiles():
     """List existing profiles or create a new one."""
     if request.method == "GET":
-        return jsonify(list(profiles_store.values()))
+        profiles = [_profile_to_dict(p) for p in profiles_store.list_profiles().values()]
+        return jsonify(profiles)
 
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
         return jsonify({"error": "name required"}), 400
-    if name in profiles_store:
+    if profiles_store.get_profile(name):
         return jsonify({"error": "profile exists"}), 409
 
-    profile = {
-        "name": name,
-        "from_channels": data.get("from_channels", []),
-        "to_channels": data.get("to_channels", []),
-        "parse_options": data.get("parse_options", ""),
-    }
-    profiles_store[name] = profile
-    return jsonify(profile), 201
+    profile = ChannelProfile(
+        id=name,
+        name=name,
+        member_channels=data.get("from_channels", []),
+        destinations=data.get("to_channels", []),
+        parse_options=data.get("parse_options", {}),
+        templates={},
+    )
+    profiles_store.create_profile(profile)
+    _update_channel_profiles(profile)
+    return jsonify(_profile_to_dict(profile)), 201
 
 
 @app.route("/api/profiles/<name>", methods=["GET", "PUT", "DELETE"])
 @login_required
 def api_profile(name: str):
     """Retrieve, update or delete a profile."""
-    profile = profiles_store.get(name)
+    profile = profiles_store.get_profile(name)
     if not profile:
         return jsonify({"error": "not found"}), 404
 
     if request.method == "GET":
-        return jsonify(profile)
+        return jsonify(_profile_to_dict(profile))
 
     if request.method == "DELETE":
-        del profiles_store[name]
+        _remove_channel_profiles(profile)
+        profiles_store.delete_profile(name)
         return "", 204
 
     data = request.get_json(silent=True) or {}
-    profile.update(
-        {
-            "from_channels": data.get("from_channels", profile["from_channels"]),
-            "to_channels": data.get("to_channels", profile["to_channels"]),
-            "parse_options": data.get("parse_options", profile.get("parse_options", "")),
-        }
-    )
-    return jsonify(profile)
+    _remove_channel_profiles(profile)
+    updates = {
+        "member_channels": data.get("from_channels", profile.member_channels),
+        "destinations": data.get("to_channels", profile.destinations),
+        "parse_options": data.get("parse_options", profile.parse_options),
+    }
+    updated = profiles_store.update_profile(name, **updates)
+    _update_channel_profiles(updated)
+    return jsonify(_profile_to_dict(updated))
 
 
 @app.route("/api/profiles/<name>/test", methods=["POST"])
 @login_required
 def api_profile_test(name: str):
     """Parse a sample message using the profile's settings."""
-    profile = profiles_store.get(name)
+    profile = profiles_store.get_profile(name)
     if not profile:
         return jsonify({"error": "not found"}), 404
 
@@ -290,7 +337,7 @@ def api_profile_test(name: str):
     message = data.get("message", "")
     # Use first from_channel as chat_id if available
     chat_id = 0
-    channels = profile.get("from_channels") or []
+    channels = profile.member_channels or []
     if channels:
         first = channels[0]
         try:
@@ -298,7 +345,7 @@ def api_profile_test(name: str):
         except Exception:
             chat_id = 0
 
-    result = parse_signal(message, chat_id, profile.get("parse_options"))
+    result = parse_signal(message, chat_id, profile.parse_options)
     return jsonify({"parsed": result})
 
 
