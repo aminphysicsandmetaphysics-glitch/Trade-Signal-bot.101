@@ -250,14 +250,8 @@ TP_VALUE_RE = re.compile(
 )
 
 # Direction synonyms used across parsers
-BUY_SYNONYMS = re.compile(
-    r"\b(?:buy|long|go\s+long|grab(?:\s+long)?|purchase|acquire|accumulate|pick\s*up|load\s*up)\b",
-    re.IGNORECASE,
-)
-SELL_SYNONYMS = re.compile(
-    r"\b(?:sell|short|go\s+short|offload|unload|dump|liquidate|dispose)\b",
-    re.IGNORECASE,
-)
+BUY_SYNONYMS = re.compile(r"\b(buy|long|purchase|grab)\b", re.IGNORECASE)
+SELL_SYNONYMS = re.compile(r"\b(sell|short|offload|unload|dump)\b", re.IGNORECASE)
 
 # Special-case parsing for the "United Kings" channels
 # (IDs taken from known public channels)
@@ -560,8 +554,12 @@ def _strip_noise_lines(lines: list[str]) -> list[str]:
             continue
 
         if "@" not in raw and "sl" not in low and "tp" not in low:
-            if NUM_RE.search(raw) or raw.startswith("#") or re.search(
-                r"\b(buy|sell|entry|position)\b", low
+            if (
+                NUM_RE.search(raw)
+                or raw.startswith("#")
+                or re.search(r"\b(buy|sell|entry|position)\b", low)
+                or BUY_SYNONYMS.search(raw)
+                or SELL_SYNONYMS.search(raw)
             ):
                 cleaned.append(raw)
             continue
@@ -808,12 +806,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
         return None
     symbol = normalize_symbol("XAUUSD")
 
-    position = ""
-    if any(BUY_SYNONYMS.search(l) for l in lines):
-        position = "Buy"
-    elif any(SELL_SYNONYMS.search(l) for l in lines):
-        position = "Sell"
-
+    position = guess_position(" ".join(lines)) or ""
     if not position:
         log.info("IGNORED (no position)")
         return None
