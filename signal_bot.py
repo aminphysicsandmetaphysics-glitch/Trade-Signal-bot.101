@@ -147,6 +147,10 @@ RR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Timeframe and high-risk detectors used by channel-specific parsers
+TF_RE = re.compile(r"\bTF[:\s]*([0-9A-Za-z]+)\b", re.IGNORECASE)
+HIGH_RISK_RE = re.compile(r"\bHIGH[-\s]*RISK\b", re.IGNORECASE)
+
 # حالت‌های پوزیشن
 POS_VARIANTS = [
     ("BUY LIMIT", "Buy Limit"),
@@ -491,6 +495,14 @@ def extract_rr(text: str) -> Optional[str]:
     m = RR_RE.search(text or "")
     if m:
         return f"{m.group(2)}/{m.group(3)}"
+    return None
+
+
+def extract_tf(text: str) -> Optional[str]:
+    """Extract timeframe indicator like '15M' or 'H1' if present."""
+    m = TF_RE.search(text or "")
+    if m:
+        return m.group(1).upper()
     return None
 
 
@@ -960,6 +972,68 @@ def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
     return to_unified(signal, chat_id, signal.get("extra", {}))
 
 
+def parse_gold_exclusive(text: str, *, return_meta: bool = False):
+    """Parse messages from the 'Gold Exclusive' channel."""
+    text = normalize_numbers(text)
+    # Ensure the symbol is always gold
+    base = f"#XAUUSD\n{text}"
+    parsed = parse_signal_classic(base, 0, {}, return_meta=True)
+    if not parsed:
+        return None
+    result, meta = parsed
+    tf = extract_tf(text)
+    high = bool(HIGH_RISK_RE.search(text))
+    if tf:
+        result += f"\n⏱ TF: {tf}"
+        meta["tf"] = tf
+    if high:
+        result += "\n⚠️ High Risk"
+        meta["high_risk"] = True
+    if return_meta:
+        return result, meta
+    return result
+
+
+def parse_lingrid(text: str, *, return_meta: bool = False):
+    """Parse messages from the 'Lingrid' channel."""
+    text = normalize_numbers(text)
+    parsed = parse_signal_classic(text, 0, {}, return_meta=True)
+    if not parsed:
+        return None
+    result, meta = parsed
+    tf = extract_tf(text)
+    high = bool(HIGH_RISK_RE.search(text))
+    if tf:
+        result += f"\n⏱ TF: {tf}"
+        meta["tf"] = tf
+    if high:
+        result += "\n⚠️ High Risk"
+        meta["high_risk"] = True
+    if return_meta:
+        return result, meta
+    return result
+
+
+def parse_forex_rr(text: str, *, return_meta: bool = False):
+    """Parse messages from the 'Forex RR' channel."""
+    text = normalize_numbers(text)
+    parsed = parse_signal_classic(text, 0, {}, return_meta=True)
+    if not parsed:
+        return None
+    result, meta = parsed
+    tf = extract_tf(text)
+    high = bool(HIGH_RISK_RE.search(text))
+    if tf:
+        result += f"\n⏱ TF: {tf}"
+        meta["tf"] = tf
+    if high:
+        result += "\n⚠️ High Risk"
+        meta["high_risk"] = True
+    if return_meta:
+        return result, meta
+    return result
+
+
 def parse_signal_classic(
     text: str,
     chat_id: int,
@@ -1063,6 +1137,30 @@ def parse_signal(
             return parse_signal_classic(text, chat_id, profile=profile, return_meta=return_meta)
 
     return parse_signal_classic(text, chat_id, profile=profile, return_meta=return_meta)
+
+
+def parse_message_by_source(
+    text: str, source_name: str, *, return_meta: bool = False
+) -> Optional[Union[str, Tuple[str, Dict[str, Any]]]]:
+    """Select parser based on *source_name*."""
+    name = (source_name or "").lower()
+    parsers: List[Callable[[str, bool], Optional[Union[str, Tuple[str, Dict[str, Any]]]]]] = []
+    if "gold" in name and "exclusive" in name:
+        parsers.append(lambda t, rm: parse_gold_exclusive(t, return_meta=rm))
+    elif "lingrid" in name:
+        parsers.append(lambda t, rm: parse_lingrid(t, return_meta=rm))
+    elif "forex" in name and "rr" in name:
+        parsers.append(lambda t, rm: parse_forex_rr(t, return_meta=rm))
+
+    for parser in parsers:
+        try:
+            res = parser(text, return_meta)
+        except Exception as e:
+            log.debug(f"{parser} failed: {e}")
+            continue
+        if res:
+            return res
+    return None
 
 # ----------------------------------------------------------------------------
 # Dedupe helper — اثرانگشت محتوا
@@ -1358,7 +1456,19 @@ class SignalBot:
                 return
 
             profile = resolve_profile(int(event.chat_id))
-            parsed = parse_signal(text, event.chat_id, profile, return_meta=True)
+            source_name = None
+            try:
+                chat = getattr(event, "chat", None)
+                if chat:
+                    source_name = getattr(chat, "title", None) or getattr(chat, "username", None)
+            except Exception:
+                source_name = None
+
+            parsed = None
+            if source_name:
+                parsed = parse_message_by_source(text, source_name, return_meta=True)
+            if not parsed:
+                parsed = parse_signal(text, event.chat_id, profile, return_meta=True)
             if not parsed:
                 log.info(f"Rejecting message from {event.chat_id}: {snippet}")
                 self.stats.increment("rejected")
