@@ -2,6 +2,7 @@ import logging
 import pytest
 import signal_bot
 from signal_bot import parse_signal, parse_signal_united_kings
+from parsers.united_kings import parse_united_kings
 
 # Sample United Kings messages
 VALID_SIGNALS = [
@@ -183,4 +184,10 @@ def test_united_kings_direction_window_priority():
     )
     result, reason = parse_signal_united_kings(message, 1234)
     assert result and "Position: Buy" in result
+    assert reason is None
+
+
+def test_parse_united_kings_range_returns_bounds():
+    res, reason = parse_united_kings("Buy gold @1900-1910")
+    assert res == (1900.0, 1910.0)
     assert reason is None
