@@ -498,14 +498,13 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
         return None
     p1, p2 = float(m.group(1)), float(m.group(2))
     lo, hi = (p1, p2) if p1 <= p2 else (p2, p1)
-    mid = (lo + hi) / 2
 
     def _fmt(x: float) -> str:
         s = f"{x:.5f}".rstrip("0").rstrip(".")
         return s
 
-    entry = _fmt(mid)
-    entry_range = (_fmt(lo), _fmt(hi))
+    entry = _fmt(lo)
+    entry_range = [_fmt(lo), _fmt(hi)]
 
     # SL
     sl = ""
@@ -549,14 +548,15 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
         log.info(f"IGNORED (invalid) -> {signal}")
         return None
 
-    # sanity check: ensure TPs are in correct direction relative to midpoint
+    # sanity check: ensure TPs are in correct direction relative to entry
     try:
+        e = float(entry)
         for tp in tps:
             tv = float(tp)
-            if position.upper().startswith("SELL") and tv > mid:
+            if position.upper().startswith("SELL") and tv > e:
                 log.info(f"IGNORED (sell but TP {tp} > entry {entry})")
                 return None
-            if position.upper().startswith("BUY") and tv < mid:
+            if position.upper().startswith("BUY") and tv < e:
                 log.info(f"IGNORED (buy but TP {tp} < entry {entry})")
                 return None
     except Exception:
