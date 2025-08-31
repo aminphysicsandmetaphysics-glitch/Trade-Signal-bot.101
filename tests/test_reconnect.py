@@ -19,13 +19,13 @@ def test_reconnect_loop_continues_on_failure():
                 return func
             return decorator
 
-        def start(self):
+        async def start(self):
             pass
 
         async def get_entity(self, c):
             return SimpleNamespace(title='dummy', id=c)
 
-        def run_until_disconnected(self):
+        async def run_until_disconnected(self):
             run_calls['count'] += 1
             raise ConnectionError('network down')
 
@@ -66,13 +66,13 @@ def test_reconnect_success_uses_same_client():
                 return func
             return decorator
 
-        def start(self):
+        async def start(self):
             pass
 
         async def get_entity(self, c):
             return SimpleNamespace(title='dummy', id=c)
 
-        def run_until_disconnected(self):
+        async def run_until_disconnected(self):
             run_calls['count'] += 1
             if run_calls['count'] == 1:
                 raise ConnectionError('network down')

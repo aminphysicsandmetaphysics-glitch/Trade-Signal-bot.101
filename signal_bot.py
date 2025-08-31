@@ -643,13 +643,10 @@ class SignalBot:
         return self._running
 
     # Stop safely (thread-safe on client loop)
-    def stop(self):
+    async def stop(self):
         if self.client:
             try:
-                fut = asyncio.run_coroutine_threadsafe(
-                    self.client.disconnect(), self.client.loop
-                )
-                fut.result(timeout=10)
+                await self.client.disconnect()
                 log.info("Client disconnected.")
             except Exception as e:
                 log.error(f"Error during disconnect: {e}")
@@ -763,7 +760,7 @@ class SignalBot:
                     log.error(f"Handler error: {e}")
 
             try:
-                self.client.start()
+                await self.client.start()
 
                 async def _verify():
                     for c in self.from_channels:
@@ -792,7 +789,7 @@ class SignalBot:
                 log.info("Bot is up...")
                 while self._running:
                     try:
-                        await asyncio.to_thread(self.client.run_until_disconnected)
+                        await self.client.run_until_disconnected()
                     except (ConnectionError, asyncio.TimeoutError):
                         async def _reconnect():
                             retries = 0
@@ -851,7 +848,6 @@ class SignalBot:
         except RuntimeError:
             log.info("SignalBot running standalone event loop.")
             asyncio.run(self._run())
-        self._running = True
 
 
 # ------------------------------------------------------------------------------

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import asyncio
 from threading import Thread
 
 from flask import (
@@ -155,7 +156,7 @@ def start_bot():
 def stop_bot():
     global bot_instance
     if bot_instance and bot_instance.is_running():
-        bot_instance.stop()
+        asyncio.run(bot_instance.stop())
         flash("Bot stopped.", "success")
     else:
         flash("Bot is not running.", "warning")
