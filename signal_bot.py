@@ -73,10 +73,37 @@ POS_VARIANTS = [
 
 # کلیدواژه‌های نویز/آپدیت/تبلیغ که باید نادیده بگیریم
 NON_SIGNAL_HINTS = [
-    "activated", "tp reached", "result so far", "screenshots", "cheers", "high-risk setup",
-    "move sl", "put your sl", "risk free", "close", "closed", "delete", "running",
-    "trade - update", "update", "guide", "watchlist", "broker", "subscription", "contact", "admin",
-    "tp almost", "tp hit", "tp reached", "sl reached", "sl hit", "profits", "week", "friday",
+    "activated",
+    "tp reached",
+    "result so far",
+    "screenshots",
+    "cheers",
+    "high-risk setup",
+    "move sl",
+    "put your sl",
+    "risk free",
+    "close",
+    "closed",
+    "partial close",
+    "delete",
+    "running",
+    "trade - update",
+    "update",
+    "analysis",
+    "setup",
+    "guide",
+    "watchlist",
+    "broker",
+    "subscription",
+    "contact",
+    "admin",
+    "tp almost",
+    "tp hit",
+    "sl reached",
+    "sl hit",
+    "profits",
+    "week",
+    "friday",
 ]
 
 TP_KEYS = ["tp", "take profit", "take-profit", "t/p", "t p"]
@@ -333,6 +360,11 @@ def calculate_rr(entry: str, sl: str, tp: str) -> Optional[str]:
 def looks_like_update(text: str) -> bool:
     t = (text or "").lower()
     return any(key in t for key in NON_SIGNAL_HINTS)
+
+
+def looks_like_noise_or_update(text: str) -> bool:
+    """Backward compatible wrapper for ``looks_like_update``."""
+    return looks_like_update(text)
 
 
 def is_valid(signal: Dict) -> bool:
