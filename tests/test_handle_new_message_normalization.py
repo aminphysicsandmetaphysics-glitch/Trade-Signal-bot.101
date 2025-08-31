@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 import signal_bot
@@ -47,3 +48,24 @@ def test_handle_new_message_normalizes_once(monkeypatch):
         loop.close()
 
     assert calls == ["۱۲۳۴"]
+
+
+def test_handle_new_message_handles_malformed_parse(monkeypatch, caplog):
+    bot = SignalBot(1, "hash", "sess", [], [])
+
+    def bad_parse(text, chat_id, profile, *, return_meta=True):
+        return "oops"
+
+    monkeypatch.setattr(signal_bot, "parse_signal", bad_parse)
+
+    event = DummyEvent(123, "hi")
+    loop = asyncio.new_event_loop()
+    try:
+        with caplog.at_level(logging.ERROR):
+            loop.run_until_complete(bot._handle_new_message(event))
+    finally:
+        loop.close()
+
+    assert bot.stats.rejected == 1
+    assert bot.stats.parsed == 0
+    assert "Unexpected parse_signal return" in caplog.text
