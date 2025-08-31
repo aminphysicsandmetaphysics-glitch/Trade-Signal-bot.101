@@ -8,6 +8,16 @@ VALID_SIGNALS = [
         """\
 📊 #XAUUSD\n📉 Position: Buy\n❗️ R/R : 1/3\n💲 Entry Price : 1932\n✔️ TP1 : 1935\n✔️ TP2 : 1940\n🚫 Stop Loss : 1925""",
     ),
+    (
+        """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1915\nTP2 : 1920\nSL : 1890\n""",
+        """\
+📊 #XAUUSD\n📉 Position: Buy\n❗️ R/R : 1.5/1\n💲 Entry Price : 1905\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1915\n✔️ TP2 : 1920\n🚫 Stop Loss : 1890""",
+    ),
+    (
+        """#XAUUSD\nSell\n@1900-1910\nTP1 : 1890\nTP2 : 1880\nSL : 1910\n""",
+        """\
+📊 #XAUUSD\n📉 Position: Sell\n❗️ R/R : 1/3\n💲 Entry Price : 1905\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1890\n✔️ TP2 : 1880\n🚫 Stop Loss : 1910""",
+    ),
 ]
 
 INVALID_SIGNALS = [
@@ -16,6 +26,10 @@ INVALID_SIGNALS = [
     """#XAUUSD\nBuy\nEntry Price : 1900\nTP1 : 1910\nTP2 : 1890\nStop Loss : 1895\n""",
     # Mixed TP directions (sell with TP above entry)
     """#XAUUSD\nSell\nEntry Price : 1900\nTP1 : 1890\nTP2 : 1910\nStop Loss : 1915\n""",
+    # Range with TP below midpoint for buy
+    """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1903\nTP2 : 1915\nSL : 1890\n""",
+    # Range with TP above midpoint for sell
+    """#XAUUSD\nSell\n@1900-1910\nTP1 : 1912\nTP2 : 1890\nSL : 1915\n""",
 ]
 
 NOISE_MESSAGES = [

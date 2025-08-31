@@ -93,9 +93,13 @@ UNITED_KINGS_CHAT_IDS = {
 # United Kings specific regex patterns
 UK_BUY_RE = re.compile(r"\b(?:buy|long)\b", re.IGNORECASE)
 UK_SELL_RE = re.compile(r"\b(?:sell|short)\b", re.IGNORECASE)
-# Entry is provided as a range after '@' separated by a dash (various unicode dashes)
-UK_ENTRY_RANGE_RE = re.compile(
-    r"@\s*(-?\d+(?:\.\d+)?)\s*[-\u2010-\u2015]\s*(-?\d+(?:\.\d+)?)"
+# Entry is provided as a range separated by a dash ("@" optional, various unicode dashes)
+UK_RANGE_RE = re.compile(
+    r"@?\s*(-?\d+(?:\.\d+)?)\s*[-\u2010-\u2015]\s*(-?\d+(?:\.\d+)?)"
+)
+# Heuristic hint: range preceded by '@' used to detect United Kings style
+UK_RANGE_WITH_AT_RE = re.compile(
+    r"@\s*-?\d+(?:\.\d+)?\s*[-\u2010-\u2015]\s*-?\d+(?:\.\d+)?"
 )
 UK_SL_RE = re.compile(r"\bS\s*L\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
 UK_TP_RE = re.compile(r"\bT\s*P\s*\d*\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
@@ -353,7 +357,7 @@ def _looks_like_united_kings(text: str) -> bool:
     if re.search(r"united\s+kings", joined, re.IGNORECASE):
         return True
     return (
-        UK_ENTRY_RANGE_RE.search(joined)
+        UK_RANGE_WITH_AT_RE.search(joined)
         and UK_SL_RE.search(joined)
         and UK_TP_RE.search(joined)
     )
@@ -378,10 +382,10 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     elif any(UK_SELL_RE.search(l) for l in lines):
         position = "Sell"
 
-    # Entry range like '@1900-1910'
+    # Entry range like '@1900-1910' or '1900-1910'
     m = None
     for l in lines:
-        m = UK_ENTRY_RANGE_RE.search(l)
+        m = UK_RANGE_RE.search(l)
         if m:
             break
     if not m:
@@ -389,12 +393,13 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
         return None
     p1, p2 = float(m.group(1)), float(m.group(2))
     lo, hi = (p1, p2) if p1 <= p2 else (p2, p1)
+    mid = (lo + hi) / 2
 
     def _fmt(x: float) -> str:
         s = f"{x:.5f}".rstrip("0").rstrip(".")
         return s
 
-    entry = _fmt((lo + hi) / 2)
+    entry = _fmt(mid)
     entry_range = (_fmt(lo), _fmt(hi))
 
     # SL
@@ -439,15 +444,14 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
         log.info(f"IGNORED (invalid) -> {signal}")
         return None
 
-    # sanity check: ensure TPs are in correct direction
+    # sanity check: ensure TPs are in correct direction relative to midpoint
     try:
-        e = float(entry)
         for tp in tps:
             tv = float(tp)
-            if position.upper().startswith("SELL") and tv > e:
+            if position.upper().startswith("SELL") and tv > mid:
                 log.info(f"IGNORED (sell but TP {tp} > entry {entry})")
                 return None
-            if position.upper().startswith("BUY") and tv < e:
+            if position.upper().startswith("BUY") and tv < mid:
                 log.info(f"IGNORED (buy but TP {tp} < entry {entry})")
                 return None
     except Exception:
