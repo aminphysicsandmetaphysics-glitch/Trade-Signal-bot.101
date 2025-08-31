@@ -40,6 +40,8 @@ INVALID_SIGNALS = [
     """#XAUUSD\nSell\nEntry Price : 1900\nTP1 : 1890\nTP2 : 1880\nStop Loss : 1895\n""",
     # Range with TP inside entry range for buy
     """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1905\nTP2 : 1908\nSL : 1890\n""",
+    # Range with TP equal to entry for buy
+    """#XAUUSD\nBuy gold\n@1900-1910\nTP1 : 1900\nTP2 : 1915\nSL : 1890\n""",
     # Range with SL inside range for buy
     """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1915\nSL : 1905\n""",
     # Range with SL inside range for sell
@@ -64,6 +66,11 @@ def test_parse_united_kings_invalid(message):
 @pytest.mark.parametrize("message", NOISE_MESSAGES)
 def test_parse_united_kings_noise(message):
     assert parse_signal(message, 1234, {}) is None
+
+
+def test_parse_united_kings_tp_equal_entry():
+    message = """#XAUUSD\nBuy gold\n@1900-1910\nTP1 : 1900\nTP2 : 1915\nSL : 1890\n"""
+    assert parse_signal_united_kings(message, 1234) is None
 
 
 def test_united_kings_entry_range_assignment(monkeypatch):
