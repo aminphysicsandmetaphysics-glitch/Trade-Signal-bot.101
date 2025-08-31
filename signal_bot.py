@@ -409,67 +409,10 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
 
 def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
     """Parser for Channel Four style messages supporting entry ranges."""
-    if looks_like_update(text):
-        log.info("IGNORED (update/noise)")
-        return None
+    # Delegate to the generic parser with entry-range support enabled.
+    return parse_signal(text, chat_id, allow_entry_range=True)
 
-    lines = [l.strip() for l in (text or "").splitlines() if l and l.strip()]
-    if not lines:
-        log.info("IGNORED (empty)")
-        return None
-
-    symbol = guess_symbol(text) or ""
-    position = guess_position(text) or ""
-    entry = extract_entry(lines) or ""
-    sl = extract_sl(lines) or ""
-    tps = extract_tps(lines)
-    rr = extract_rr(text)
-    if not rr and entry and sl and tps:
-        rr = calculate_rr(entry, sl, tps[0])
-
-    entry_range: Optional[Tuple[str, str]] = None
-    for l in lines:
-        ll = l.lower()
-        if any(k in ll for k in ENTRY_KEYS):
-            m = re.search(r"(-?\d+(?:\.\d+)?)[^\d]+(-?\d+(?:\.\d+)?)", l)
-            if m:
-                entry_range = (m.group(1), m.group(2))
-                if not entry:
-                    entry = m.group(1)
-                break
-
-    signal = {
-        "symbol": symbol,
-        "position": position,
-        "entry": entry,
-        "sl": sl,
-        "tps": tps,
-        "rr": rr,
-        "extra": {},
-    }
-    if entry_range:
-        signal["extra"]["entries"] = {"range": entry_range}
-
-    if not is_valid(signal):
-        log.info(f"IGNORED (invalid) -> {signal}")
-        return None
-
-    try:
-        e = float(entry)
-        if position.upper().startswith("SELL"):
-            if all(float(tp) > e for tp in tps):
-                log.info("IGNORED (sell but all TP > entry)")
-                return None
-        if position.upper().startswith("BUY"):
-            if all(float(tp) < e for tp in tps):
-                log.info("IGNORED (buy but all TP < entry)")
-                return None
-    except Exception:
-        pass
-
-    return to_unified(signal, chat_id, signal.get("extra", {}))
-
-def parse_signal(text: str, chat_id: int) -> Optional[str]:
+def parse_signal(text: str, chat_id: int, *, allow_entry_range: bool = False) -> Optional[str]:
     text = normalize_numbers(text)
     # Special-case: United Kings parser
     if chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text):
@@ -499,6 +442,18 @@ def parse_signal(text: str, chat_id: int) -> Optional[str]:
     if not rr and entry and sl and tps:
         rr = calculate_rr(entry, sl, tps[0])
 
+    entry_range: Optional[Tuple[str, str]] = None
+    if allow_entry_range:
+        for l in lines:
+            ll = l.lower()
+            if any(k in ll for k in ENTRY_KEYS):
+                m = re.search(r"(-?\d+(?:\.\d+)?)[^\d]+(-?\d+(?:\.\d+)?)", l)
+                if m:
+                    entry_range = (m.group(1), m.group(2))
+                    if not entry:
+                        entry = m.group(1)
+                    break
+
     signal = {
         "symbol": symbol,
         "position": position,
@@ -506,7 +461,10 @@ def parse_signal(text: str, chat_id: int) -> Optional[str]:
         "sl": sl,
         "tps": tps,
         "rr": rr,
+        "extra": {},
     }
+    if entry_range:
+        signal["extra"]["entries"] = {"range": entry_range}
 
     if not is_valid(signal):
         log.info(f"IGNORED (invalid) -> {signal}")
