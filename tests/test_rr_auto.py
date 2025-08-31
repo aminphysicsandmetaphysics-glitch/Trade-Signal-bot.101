@@ -12,4 +12,4 @@ def test_parse_signal_calculates_rr():
         "✔️ TP1 : 1910\n"
         "🚫 Stop Loss : 1895"
     )
-    assert parse_signal(message, 1234) == expected
+    assert parse_signal(message, 1234, {}) == expected
