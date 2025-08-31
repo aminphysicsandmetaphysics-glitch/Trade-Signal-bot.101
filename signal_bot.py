@@ -263,6 +263,24 @@ SELL_TERMS = ["sell", "selling", "short", "offload", "unload", "dump", "ditch"]
 BUY_SYNONYMS = re.compile(rf"\b({'|'.join(BUY_TERMS)})\b", re.IGNORECASE)
 SELL_SYNONYMS = re.compile(rf"\b({'|'.join(SELL_TERMS)})\b", re.IGNORECASE)
 
+
+def validate_direction(direction: str) -> Optional[str]:
+    """Normalise *direction* to "Buy" or "Sell".
+
+    Returns the capitalised direction if it can be identified via the
+    ``BUY_SYNONYMS`` or ``SELL_SYNONYMS`` regexes.  ``None`` is returned
+    when the input does not clearly express a trading direction.
+    """
+
+    if not direction:
+        return None
+    d = direction.strip().lower()
+    if BUY_SYNONYMS.search(d):
+        return "Buy"
+    if SELL_SYNONYMS.search(d):
+        return "Sell"
+    return None
+
 # Special-case parsing for the "United Kings" channels
 # (IDs taken from known public channels)
 UNITED_KINGS_CHAT_IDS = {
@@ -1101,33 +1119,42 @@ def parse_signal(
 # -----------------------------------------------------------------------------
 
 
-def _parse_with_tf(text: str):
-    """Helper to parse a message using classic rules and extract timeframe."""
+def _parse_with_tf(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Parse a message using classic rules and extract timeframe.
+
+    Returns a pair ``(signal_dict, reason)`` where ``signal_dict`` is the
+    structured signal dictionary on success.  If parsing fails, ``reason``
+    describes why the message was ignored.
+    """
+
     parsed = parse_signal_classic(text, 0, {}, return_meta=True)
     if not parsed:
-        return None
-    formatted, meta = parsed
+        return None, "invalid"
+    _, meta = parsed
+    direction = validate_direction(meta.get("position"))
+    if not direction:
+        return None, "no position"
+    meta["position"] = direction
     tf = extract_tf(text)
     if tf:
-        formatted += f"\n⏳ TF : {tf}"
         meta["tf"] = tf
-    return formatted, meta
+    return meta, None
 
 
-def parse_gold_exclusive(text: str):
+def parse_gold_exclusive(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     return _parse_with_tf(text)
 
 
-def parse_lingrid(text: str):
+def parse_lingrid(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     return _parse_with_tf(text)
 
 
-def parse_forex_rr(text: str):
+def parse_forex_rr(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     return _parse_with_tf(text)
 
 
 def parse_message_by_source(text: str, source_name: str):
-    """Select parser based on *source_name* and return parsed result."""
+    """Select parser based on *source_name* and return parsed signal dict."""
     name = (source_name or "").lower()
     if "gold" in name and "exclusive" in name:
         return parse_gold_exclusive(text)
@@ -1438,7 +1465,14 @@ class SignalBot:
                 source_name = getattr(chat_obj, "title", "") or getattr(chat_obj, "username", "")
             parsed = None
             if source_name:
-                parsed = parse_message_by_source(text, source_name)
+                sig_res = parse_message_by_source(text, source_name)
+                if sig_res:
+                    sig, reason = sig_res
+                    if sig:
+                        formatted = to_unified(sig, event.chat_id, sig.get("extra", {}))
+                        parsed = (formatted, sig)
+                    else:
+                        log.info(f"IGNORED ({reason})")
             if not parsed:
                 parsed = parse_signal(text, event.chat_id, profile, return_meta=True)
             if not parsed:

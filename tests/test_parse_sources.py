@@ -9,54 +9,39 @@ from signal_bot import (
 
 def test_parse_gold_exclusive():
     message = """#XAUUSD\nBuy\nEntry 1900\nSL 1890\nTP 1910\nR/R 1/2\nTF 1H\n"""
-    expected = """\
-📊 #XAUUSD
-📉 Position: Buy
-❗️ R/R : 1/2
-💲 Entry Price : 1900
-✔️ TP1 : 1910
-🚫 Stop Loss : 1890
-⏳ TF : 1H"""
-    result, meta = parse_gold_exclusive(message)
-    assert result == expected
-    assert meta["symbol"] == "XAUUSD"
-    assert meta["position"] == "Buy"
-    assert meta["rr"] == "1/2"
-    assert meta["tf"] == "1H"
+    signal, reason = parse_gold_exclusive(message)
+    assert reason is None
+    assert signal["symbol"] == "XAUUSD"
+    assert signal["position"] == "Buy"
+    assert signal["entry"] == "1900"
+    assert signal["sl"] == "1890"
+    assert signal["tps"] == ["1910"]
+    assert signal["rr"] == "1/2"
+    assert signal["tf"] == "1H"
 
 
 def test_parse_lingrid():
     message = """#EURUSD\nSell\nEntry 1.1000\nSL 1.1050\nTP 1.0950\nR/R 1/2\nTime Frame 1H\n"""
-    expected = """\
-📊 #EURUSD
-📉 Position: Sell
-❗️ R/R : 1/2
-💲 Entry Price : 1.1000
-✔️ TP1 : 1.0950
-🚫 Stop Loss : 1.1050
-⏳ TF : 1H"""
-    result, meta = parse_lingrid(message)
-    assert result == expected
-    assert meta["symbol"] == "EURUSD"
-    assert meta["position"] == "Sell"
-    assert meta["tf"] == "1H"
+    signal, reason = parse_lingrid(message)
+    assert reason is None
+    assert signal["symbol"] == "EURUSD"
+    assert signal["position"] == "Sell"
+    assert signal["entry"] == "1.1000"
+    assert signal["sl"] == "1.1050"
+    assert signal["tps"] == ["1.0950"]
+    assert signal["tf"] == "1H"
 
 
 def test_parse_forex_rr():
     message = """#GBPUSD\nBuy\nEntry 1.3000\nSL 1.2950\nTP 1.3100\nR/R 1/2\nTF 30M\n"""
-    expected = """\
-📊 #GBPUSD
-📉 Position: Buy
-❗️ R/R : 1/2
-💲 Entry Price : 1.3000
-✔️ TP1 : 1.3100
-🚫 Stop Loss : 1.2950
-⏳ TF : 30M"""
-    result, meta = parse_forex_rr(message)
-    assert result == expected
-    assert meta["symbol"] == "GBPUSD"
-    assert meta["position"] == "Buy"
-    assert meta["tf"] == "30M"
+    signal, reason = parse_forex_rr(message)
+    assert reason is None
+    assert signal["symbol"] == "GBPUSD"
+    assert signal["position"] == "Buy"
+    assert signal["entry"] == "1.3000"
+    assert signal["sl"] == "1.2950"
+    assert signal["tps"] == ["1.3100"]
+    assert signal["tf"] == "30M"
 
 
 def test_parse_message_by_source_routing():
