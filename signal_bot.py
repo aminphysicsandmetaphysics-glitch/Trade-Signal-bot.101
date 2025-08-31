@@ -1472,6 +1472,13 @@ class SignalBot:
                 self.stats.increment("rejected")
                 self.stats.record(snippet, "rejected", "parse")
                 return
+            if not isinstance(parsed, tuple) or len(parsed) != 2:
+                log.error(
+                    f"Unexpected parse_signal return from {event.chat_id}: {parsed!r}"
+                )
+                self.stats.increment("rejected")
+                self.stats.record(snippet, "rejected", "parse")
+                return
             formatted, meta = parsed
 
             self.stats.increment("parsed")
