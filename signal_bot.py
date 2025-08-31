@@ -558,6 +558,28 @@ def _looks_like_united_kings(text: str) -> bool:
 
 
 def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
+    """Parse a United Kings style signal.
+
+    Parameters
+    ----------
+    text : str
+        Raw message body from the source channel.
+    chat_id : int
+        Numeric identifier of the channel the message originated from.
+
+    Notes
+    -----
+    The parser honours the global ``skip_rr_for`` collection, skipping
+    risk/reward ratio calculation when ``chat_id`` is present in that set.
+    For recognised entry ranges, the lower bound is used if an ``@`` symbol
+    precedes the range (``@1900-1910``).  When the ``@`` is absent, the
+    midpoint of the provided range becomes the effective entry price.
+
+    Returns
+    -------
+    Optional[str]
+        A formatted signal string or ``None`` if the message is ignored.
+    """
     if looks_like_update(text):
         log.info("IGNORED (update/noise)")
         return None
