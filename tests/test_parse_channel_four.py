@@ -21,6 +21,10 @@ INVALID_SIGNALS = [
     """#XAUUSD\nSell\nEntry Range: 1930-1935\nTP1: 1920\nTP2: 1910\n""",
     # Reversed TP direction (buy but TP below entry)
     """#EURUSD\nBuy\nEntry Range: 1.0800-1.0810\nTP1: 1.0700\nTP2: 1.0600\nSL: 1.0750\n""",
+    # Mixed TP directions (sell with TP above entry)
+    """#XAUUSD\nSell Limit\nEntry Range: 1930 - 1935\nTP1: 1920\nTP2: 1940\nSL: 1945\n""",
+    # Mixed TP directions (buy with TP below entry)
+    """#EURUSD\nBuy\nEntry Range: 1.0800-1.0810\nTP1: 1.0850\nTP2: 1.0700\nSL: 1.0750\n""",
 ]
 
 # Noise messages that should be ignored

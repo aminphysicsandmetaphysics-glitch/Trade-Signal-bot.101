@@ -12,6 +12,10 @@ VALID_SIGNALS = [
 
 INVALID_SIGNALS = [
     """#XAUUSD\nBuy\nEntry Price: 1932\nStop Loss: 1925""",  # Missing TP
+    # Mixed TP directions (buy with TP below entry)
+    """#XAUUSD\nBuy\nEntry Price : 1900\nTP1 : 1910\nTP2 : 1890\nStop Loss : 1895\n""",
+    # Mixed TP directions (sell with TP above entry)
+    """#XAUUSD\nSell\nEntry Price : 1900\nTP1 : 1890\nTP2 : 1910\nStop Loss : 1915\n""",
 ]
 
 NOISE_MESSAGES = [

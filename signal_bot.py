@@ -394,13 +394,14 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     # sanity check: ensure TPs are in correct direction
     try:
         e = float(entry)
-        tp_vals = [float(tp) for tp in tps]
-        if position.upper().startswith("SELL") and any(tp > e for tp in tp_vals):
-            log.info("IGNORED (sell but TP > entry)")
-            return None
-        if position.upper().startswith("BUY") and any(tp < e for tp in tp_vals):
-            log.info("IGNORED (buy but TP < entry)")
-            return None
+        for tp in tps:
+            tv = float(tp)
+            if position.upper().startswith("SELL") and tv > e:
+                log.info(f"IGNORED (sell but TP {tp} > entry {entry})")
+                return None
+            if position.upper().startswith("BUY") and tv < e:
+                log.info(f"IGNORED (buy but TP {tp} < entry {entry})")
+                return None
     except Exception:
         pass
 
@@ -456,13 +457,13 @@ def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
 
     try:
         e = float(entry)
-        if position.upper().startswith("SELL"):
-            if all(float(tp) > e for tp in tps):
-                log.info("IGNORED (sell but all TP > entry)")
+        for tp in tps:
+            tv = float(tp)
+            if position.upper().startswith("SELL") and tv > e:
+                log.info(f"IGNORED (sell but TP {tp} > entry {entry})")
                 return None
-        if position.upper().startswith("BUY"):
-            if all(float(tp) < e for tp in tps):
-                log.info("IGNORED (buy but all TP < entry)")
+            if position.upper().startswith("BUY") and tv < e:
+                log.info(f"IGNORED (buy but TP {tp} < entry {entry})")
                 return None
     except Exception:
         pass
@@ -515,13 +516,13 @@ def parse_signal(text: str, chat_id: int) -> Optional[str]:
     # sanity check: جهت TPها با Entry همخوان باشد
     try:
         e = float(entry)
-        if position.upper().startswith("SELL"):
-            if all(float(tp) > e for tp in tps):
-                log.info("IGNORED (sell but all TP > entry)")
+        for tp in tps:
+            tv = float(tp)
+            if position.upper().startswith("SELL") and tv > e:
+                log.info(f"IGNORED (sell but TP {tp} > entry {entry})")
                 return None
-        if position.upper().startswith("BUY"):
-            if all(float(tp) < e for tp in tps):
-                log.info("IGNORED (buy but all TP < entry)")
+            if position.upper().startswith("BUY") and tv < e:
+                log.info(f"IGNORED (buy but TP {tp} < entry {entry})")
                 return None
     except Exception:
         pass
