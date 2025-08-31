@@ -1,4 +1,11 @@
-from signal_bot import parse_signal, _looks_like_united_kings, UNITED_KINGS_CHAT_IDS
+import pytest
+
+from signal_bot import (
+    parse_signal,
+    _looks_like_united_kings,
+    _clean_uk_lines,
+    UNITED_KINGS_CHAT_IDS,
+)
 
 NEW_CHAT_ID = -1002223574325
 
@@ -38,3 +45,20 @@ def test_parse_united_kings_unknown_id_detection():
 
 def test_parse_united_kings_known_chat_id():
     assert parse_signal(MESSAGE, NEW_CHAT_ID, {}) == EXPECTED
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "TP almost hit",
+        "SL hit 1900",
+        "SL reached 1900",
+        "Breakeven now",
+        "Break even achieved",
+        "Trade is risk free",
+        "Trade is risk    free",
+    ],
+)
+def test_united_kings_noise_lines_ignored(line):
+    assert _clean_uk_lines(line) == []
+    assert parse_signal(line, NEW_CHAT_ID, {}) is None
