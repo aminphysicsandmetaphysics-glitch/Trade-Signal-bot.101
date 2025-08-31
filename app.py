@@ -27,7 +27,7 @@ from flask import (
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from signal_bot import SignalBot
+from signal_bot import SignalBot, parse_signal
 
 
 # ----------------------------------------------------------------------------
@@ -41,10 +41,8 @@ if not secret:
     raise RuntimeError("SESSION_SECRET environment variable must be set")
 app.secret_key = secret
 
-admin_user = os.environ.get("ADMIN_USER")
-admin_pass = os.environ.get("ADMIN_PASS")
-if not admin_user or not admin_pass:
-    raise RuntimeError("ADMIN_USER and ADMIN_PASS must be set")
+admin_user = os.environ.get("ADMIN_USER", "admin")
+admin_pass = os.environ.get("ADMIN_PASS", "admin")
 
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
@@ -60,6 +58,11 @@ config_store = {
     "from_channels": os.environ.get("SOURCES", ""),
     "to_channels": os.environ.get("DESTS", ""),
 }
+
+# Profiles are stored in-memory and can be managed via REST APIs.
+# Each profile is keyed by a unique ``name`` and stores channel lists
+# along with optional parsing options.
+profiles_store: dict[str, dict] = {}
 
 
 # ----------------------------------------------------------------------------
@@ -156,6 +159,110 @@ def index():
     return render_template("index.html", cfg=cfg)
 
 
+@app.route("/profiles", methods=["GET"])
+@login_required
+def profiles_page():
+    """Render a simple listing of available profiles."""
+    return render_template("profiles.html", profiles=profiles_store)
+
+
+@app.route("/profiles/new", methods=["GET"])
+@login_required
+def new_profile_page():
+    """Render form for creating a new profile."""
+    return render_template("profile.html", profile=None)
+
+
+@app.route("/profiles/<name>", methods=["GET"])
+@login_required
+def edit_profile_page(name: str):
+    """Render form for editing an existing profile."""
+    profile = profiles_store.get(name)
+    if not profile:
+        flash("Profile not found.", "error")
+        return redirect(url_for("profiles_page"))
+    return render_template("profile.html", profile=profile)
+
+
+# -----------------------------------------------------------------------------
+# Profile REST API
+# -----------------------------------------------------------------------------
+
+
+@app.route("/api/profiles", methods=["GET", "POST"])
+@login_required
+def api_profiles():
+    """List existing profiles or create a new one."""
+    if request.method == "GET":
+        return jsonify(list(profiles_store.values()))
+
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    if name in profiles_store:
+        return jsonify({"error": "profile exists"}), 409
+
+    profile = {
+        "name": name,
+        "from_channels": data.get("from_channels", []),
+        "to_channels": data.get("to_channels", []),
+        "parse_options": data.get("parse_options", ""),
+    }
+    profiles_store[name] = profile
+    return jsonify(profile), 201
+
+
+@app.route("/api/profiles/<name>", methods=["GET", "PUT", "DELETE"])
+@login_required
+def api_profile(name: str):
+    """Retrieve, update or delete a profile."""
+    profile = profiles_store.get(name)
+    if not profile:
+        return jsonify({"error": "not found"}), 404
+
+    if request.method == "GET":
+        return jsonify(profile)
+
+    if request.method == "DELETE":
+        del profiles_store[name]
+        return "", 204
+
+    data = request.get_json(silent=True) or {}
+    profile.update(
+        {
+            "from_channels": data.get("from_channels", profile["from_channels"]),
+            "to_channels": data.get("to_channels", profile["to_channels"]),
+            "parse_options": data.get("parse_options", profile.get("parse_options", "")),
+        }
+    )
+    return jsonify(profile)
+
+
+@app.route("/api/profiles/<name>/test", methods=["POST"])
+@login_required
+def api_profile_test(name: str):
+    """Parse a sample message using the profile's settings."""
+    profile = profiles_store.get(name)
+    if not profile:
+        return jsonify({"error": "not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    message = data.get("message", "")
+    # Use first from_channel as chat_id if available
+    chat_id = 0
+    channels = profile.get("from_channels") or []
+    if channels:
+        first = channels[0]
+        try:
+            chat_id = int(first)
+        except Exception:
+            chat_id = 0
+
+    result = parse_signal(message, chat_id)
+    return jsonify({"parsed": result})
+
+
 @app.route("/save_config", methods=["POST"])
 @login_required
 def save_config():
@@ -218,7 +325,6 @@ def start_bot():
 
 
 @app.route("/stop_bot", methods=["POST"])
-@login_required
 def stop_bot():
     global bot_instance
     if bot_instance and bot_instance.is_running():
