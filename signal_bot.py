@@ -27,7 +27,10 @@ setup_logging()
 log = logging.getLogger("signal_bot")
 
 import asyncio
-import re
+try:
+    import regex as re
+except Exception:  # pragma: no cover - fallback when regex isn't installed
+    import re
 import hashlib
 import time
 from datetime import datetime, timezone, timedelta
@@ -344,31 +347,46 @@ def normalize_numbers(text: str) -> str:
     return text
 
 
-def strip_invisibles(text: str) -> str:
-    """Remove BIDI marks and non-breaking spaces."""
-    if not text:
-        return ""
-    invisibles = dict.fromkeys(
-        map(ord, "\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u00a0\u202f")
-    )
-    return text.translate(invisibles)
+BIDI_ZW = r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]"
+NBSP = "\u00a0"
+EMOJI = (
+    r"[\p{Emoji_Presentation}\p{Extended_Pictographic}]"
+    if re.__name__ == "regex"
+    else r"[\U0001F000-\U0001FFFF]"
+)
+
+
+def strip_invisibles(s: str) -> str:
+    s = re.sub(BIDI_ZW, "", s)
+    s = s.replace(NBSP, " ")
+    s = re.sub(EMOJI, "", s)
+    return s
 
 
 def guess_symbol(text: str) -> Optional[str]:
-    cleaned = strip_invisibles(text or "")
-    up = cleaned.upper()
+    text = text or ""
+    # Join symbols split by whitespace inside hashtags when the second token
+    # resembles a currency code, e.g. "#GBP USD" -> "#GBPUSD"
+    def _join(m: re.Match) -> str:  # type: ignore[name-defined]
+        base, quote = m.group(1), m.group(2)
+        if quote.upper() in CURRENCY_CODES:
+            return f"#{base}{quote}"
+        return m.group(0)
+
+    text = re.sub(r"#\s*([A-Za-z]{3})\s+([A-Za-z]{3,6})", _join, text)
+    up = text.upper()
     m = PAIR_RE.search(up)
     token = None
     if m:
         token = m.group(1)
     else:
-        hm = HASHTAG_PAIR_RE.search(cleaned)
+        hm = HASHTAG_PAIR_RE.search(text)
         if hm:
             base = hm.group(1).upper()
             quote = (hm.group(2) or "").upper()
             token = base + quote
         else:
-            parts = cleaned.strip().split()
+            parts = text.strip().split()
             if parts:
                 token = parts[0]
             else:
@@ -1030,7 +1048,7 @@ def parse_channel_four(
 
 def parse_gold_exclusive(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Parse messages from the 'Gold Exclusive' channel."""
-    text = normalize_numbers(text)
+    text = strip_invisibles(normalize_numbers(text))
     symbol = normalize_symbol("XAUUSD")
     base = f"#{symbol}\n{text}"
     parsed = parse_signal_classic(base, 0, {}, return_meta=True)
@@ -1048,7 +1066,7 @@ def parse_gold_exclusive(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[
 
 def parse_lingrid(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Parse messages from the 'Lingrid' channel."""
-    text = normalize_numbers(text)
+    text = strip_invisibles(normalize_numbers(text))
     parsed = parse_signal_classic(text, 0, {}, return_meta=True)
     if not parsed:
         return None, "invalid"
@@ -1064,7 +1082,7 @@ def parse_lingrid(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
 
 def parse_forex_rr(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Parse messages from the 'Forex RR' channel."""
-    text = normalize_numbers(text)
+    text = strip_invisibles(normalize_numbers(text))
     parsed = parse_signal_classic(text, 0, {}, return_meta=True)
     if not parsed:
         return None, "invalid"
@@ -1085,7 +1103,7 @@ def parse_signal_classic(
     return_meta: bool = False,
 ) -> Optional[Union[str, Tuple[str, Dict[str, Any]]]]:
     profile = profile or {}
-    text = normalize_numbers(text)
+    text = strip_invisibles(normalize_numbers(text))
     if not text:
         log.info("IGNORED (empty)")
         return None
@@ -1157,7 +1175,7 @@ def parse_signal(
     return_meta: bool = False,
 ) -> Optional[Union[str, Tuple[str, Dict[str, Any]]]]:
     profile = profile or {}
-    text = normalize_numbers(text)
+    text = strip_invisibles(normalize_numbers(text))
     if not text:
         log.info("IGNORED (empty)")
         return None
@@ -1204,7 +1222,7 @@ def parse_message_by_source(
     The message text is normalised and stripped of noisy lines before being
     routed to a channel-specific parser.
     """
-    text = normalize_numbers(text)
+    text = strip_invisibles(normalize_numbers(text))
     lines = _strip_noise_lines((text or "").splitlines())
     text = "\n".join(lines)
     if not text:
