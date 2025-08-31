@@ -812,6 +812,65 @@ class SignalBot:
         return False
 
 
+    async def _handle_new_message(self, event):
+        """Process a new incoming message event."""
+        try:
+            text = event.message.message or ""
+            text = normalize_numbers(text)
+            snippet = text[:160].replace("\n", " ")
+            log.info(f"MSG from {event.chat_id}: {snippet} ...")
+
+            if not self._fresh_enough(getattr(event.message, "date", self.startup_time)):
+                return
+
+            if self._dedup_and_remember(int(event.chat_id), event.message):
+                return
+
+            profile = resolve_profile(int(event.chat_id))
+            formatted = parse_signal(text, event.chat_id, profile)
+            if not formatted:
+                log.info(f"Rejecting message from {event.chat_id}: {snippet}")
+                return
+
+            dests, template = self.resolve_targets(event.chat_id)
+            if template:
+                try:
+                    formatted = render_template(template, {"message": formatted})
+                except Exception as tmpl_err:
+                    log.error(f"Template render failed for {template}: {tmpl_err}")
+
+            for dest in dests:
+                try:
+                    await self.client.send_message(dest, formatted)
+                    log.info(f"SENT to {dest}")
+                except (ChatWriteForbiddenError, ChatAdminRequiredError) as e:
+                    log.error(f"Send failed to {dest} (permissions): {e}")
+                except Exception as e:
+                    log.warning(f"Send failed to {dest} (will attempt copy): {e}")
+                    try:
+                        if event.message.media:
+                            await self.client.send_file(
+                                dest,
+                                event.message.media,
+                                caption=formatted,
+                                force_document=False,
+                                allow_cache=False,
+                            )
+                        else:
+                            await self.client.send_message(dest, formatted)
+                        log.info(f"COPIED to {dest}")
+                    except Exception as copy_err:
+                        log.error(f"Copy failed to {dest}: {copy_err}")
+
+            if self._callback:
+                try:
+                    self._callback({"source_chat_id": str(event.chat_id), "text": formatted})
+                except Exception:
+                    pass
+        except Exception as e:
+            log.error(f"Handler error: {e}")
+
+
     # Start (with auto-reconnect loop)
     async def _run(self):
         if self._running:
@@ -830,61 +889,7 @@ class SignalBot:
 
             @self.client.on(events.NewMessage(chats=self.from_channels, incoming=True))
             async def handler(event):
-                """Receive, parse, and forward/copy."""
-                try:
-                    text = event.message.message or ""
-                    text = normalize_numbers(text)
-                    snippet = text[:160].replace("\n", " ")
-                    log.info(f"MSG from {event.chat_id}: {snippet} ...")
-
-                    if not self._fresh_enough(getattr(event.message, "date", self.startup_time)):
-                        return
-
-                    if self._dedup_and_remember(int(event.chat_id), event.message):
-                        return
-
-                    profile = resolve_profile(int(event.chat_id))
-                    formatted = parse_signal(text, event.chat_id, profile)
-                    if not formatted:
-                        return
-
-                    dests, template = self.resolve_targets(event.chat_id)
-                    if template:
-                        try:
-                            formatted = render_template(template, {"message": formatted})
-                        except Exception as tmpl_err:
-                            log.error(f"Template render failed for {template}: {tmpl_err}")
-
-                    for dest in dests:
-                        try:
-                            await self.client.send_message(dest, formatted)
-                            log.info(f"SENT to {dest}")
-                        except (ChatWriteForbiddenError, ChatAdminRequiredError) as e:
-                            log.error(f"Send failed to {dest} (permissions): {e}")
-                        except Exception as e:
-                            log.warning(f"Send failed to {dest} (will attempt copy): {e}")
-                            try:
-                                if event.message.media:
-                                    await self.client.send_file(
-                                        dest,
-                                        event.message.media,
-                                        caption=formatted,
-                                        force_document=False,
-                                        allow_cache=False,
-                                    )
-                                else:
-                                    await self.client.send_message(dest, formatted)
-                                log.info(f"COPIED to {dest}")
-                            except Exception as copy_err:
-                                log.error(f"Copy failed to {dest}: {copy_err}")
-
-                    if self._callback:
-                        try:
-                            self._callback({"source_chat_id": str(event.chat_id), "text": formatted})
-                        except Exception:
-                            pass
-                except Exception as e:
-                    log.error(f"Handler error: {e}")
+                await self._handle_new_message(event)
 
             try:
                 await self.client.start()
