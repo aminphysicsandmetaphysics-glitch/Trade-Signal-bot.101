@@ -502,6 +502,7 @@ class FreshDedupe:
 
 
 # ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 # SignalBot class (kept, with stability fixes: freshness + dedupe)
 # ----------------------------------------------------------------------------
 
@@ -545,6 +546,18 @@ class SignalBot:
     @property
     def running(self) -> bool:
         return self._running
+
+    def is_running(self) -> bool:
+        return self._running
+
+    def stop(self):
+        self._running = False
+        if self._client:
+            try:
+                asyncio.run_coroutine_threadsafe(self._client.disconnect(), self._client.loop)
+            except Exception:
+                pass
+            self._client = None
 
     # Run loop
     async def _run(self):
@@ -613,157 +626,12 @@ class SignalBot:
         if self._running:
             return
         self._running = True
-        while True:
+        while self._running:
             try:
                 asyncio.run(self._run())
             except KeyboardInterrupt:
                 log.info("Interrupted by user.")
-                break
-            except Exception as e:
-                log.exception(f"Fatal in main loop; restarting in 5s: {e}")
-                time.sleep(5)
-
-# ----------------------------------------------------------------------------
-# Entrypoint utilities
-# ----------------------------------------------------------------------------
-
-def parse_source_list(val: str) -> List[Union[int, str]]:
-    xs = []
-    for p in (val or "").split(","):
-        p = p.strip()
-        if not p:
-            continue
-        try:
-            xs.append(int(p))
-        except Exception:
-            xs.append(p)
-    return xs
-
-def _coerce_channel_id(x: Union[int, str]) -> Union[int, str]:
-    """Coerce positive numeric IDs to Telegram channel form -100XXXXXXXXXX."""
-    if isinstance(x, int):
-        return x if x < 0 else int("-100" + str(x))
-    return x
-
-
-# ----------------------------------------------------------------------------
-# SignalBot class (kept, with stability fixes: freshness + dedupe)
-# ----------------------------------------------------------------------------
-
-class SignalBot:
-    """A Telethon-based bot that forwards or copies signals from source channels."""
-
-    def __init__(
-        self,
-        api_id: int,
-        api_hash: str,
-        string_session: str,
-        sources: List[Union[int, str]],
-        sink: Union[int, str],
-        copy_if_protected: bool = True,
-        skip_rr_for: Iterable[int] = (),
-    ):
-        self.api_id = api_id
-        self.api_hash = api_hash
-        self.string_session = string_session
-        self.sources = [self._normalize_channel_id(x) for x in sources]
-        self.sink = self._normalize_channel_id(sink)
-        self.copy_if_protected = copy_if_protected
-        self.skip_rr_for = set(skip_rr_for)
-
-        self._running = False
-        self._client = None
-        self._dedupe = FreshDedupe(ttl_sec=120)
-        self._copy_rate = RateLimiter(rate=1.5, burst=3)
-
-    # Normalise channel id to Telegram format -100XXXXXXXXXX
-    def _normalize_channel_id(self, x: Union[int, str]) -> Union[int, str]:
-        if isinstance(x, int):
-            return x if x < 0 else int("-100" + str(x))
-        try:
-            xi = int(x)
-            return xi if xi < 0 else int("-100" + str(xi))
-        except Exception:
-            return x
-
-    # Public getter (optional)
-    @property
-    def running(self) -> bool:
-        return self._running
-
-    # Run loop
-    async def _run(self):
-        from telethon import TelegramClient, events
-
-        session = StringSession(self.string_session)
-        client = TelegramClient(session, self.api_id, self.api_hash)
-        await client.connect()
-        self._client = client
-
-        @client.on(events.NewMessage(chats=self.sources))
-        async def handler(event):
-            try:
-                if self._dedupe.seen(event.message, event.chat_id):
-                    log.debug("Duplicate ignored (sliding window)")
-                    return
-
-                raw_text = normalize_numbers(event.message.message or "")
-                parsed = parse_signal(raw_text, event.chat_id, self.skip_rr_for)
-                if not parsed:
-                    log.info("No valid signal parsed; skipping.")
-                    return
-
-                try:
-                    # Attempt direct forward first
-                    await client(ForwardMessagesRequest(
-                        from_peer=event.message.to_id,
-                        id=[event.message.id],
-                        to_peer=self.sink,
-                        with_my_score=False,
-                        drop_author=True,
-                    ))
-                    log.info("Forwarded message (native forward).")
-                except (ChatForwardsRestrictedError, ChatAdminRequiredError, MessageAuthorRequiredError, ChannelPrivateError):
-                    if not self.copy_if_protected:
-                        log.warning("Forward restricted and copy mode disabled; skipping.")
-                        return
-                    # Copy mode (text + photo if exists)
-                    await self._copy_message(client, event, parsed)
-                    log.info("Copied message (fallback).")
-
-            except FloodWaitError as fw:
-                log.warning(f"Flood wait: {fw.seconds}s; pausing handler.")
-                await asyncio.sleep(min(5, fw.seconds))
-            except SlowModeWaitError as sw:
-                log.warning(f"Slow mode: {sw.seconds}s; delaying send.")
-                await asyncio.sleep(min(5, sw.seconds))
-            except ChatWriteForbiddenError:
-                log.error("Cannot write to sink channel (forbidden).")
-            except Exception as e:
-                log.exception(f"Unhandled in handler: {e}")
-
-        log.info("Bot is up; listening to sources.")
-        await client.run_until_disconnected()
-
-    async def _copy_message(self, client, event, parsed_text: str):
-        self._copy_rate.acquire()
-        # send parsed text; attach photo if original had one
-        media = None
-        if isinstance(event.message.media, MessageMediaPhoto):
-            media = event.message.media
-        await client.send_message(self.sink, parsed_text, file=media, link_preview=False)
-
-    # Start (with auto-reconnect loop)
-    def start(self):
-        if self._running:
-            return
-        self._running = True
-        while True:
-            try:
-                asyncio.run(self._run())
-            except KeyboardInterrupt:
-                log.info("Interrupted by user.")
-                break
+                self._running = False
             except Exception as e:
                 log.exception(f"Fatal in main loop; restarting in 5s: {e}")
                 time.sleep(5)

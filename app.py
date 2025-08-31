@@ -157,7 +157,7 @@ def start_bot():
 @app.route("/stop_bot", methods=["POST"])
 def stop_bot():
     global bot_instance
-    if bot_instance and bot_instance.is_running():
+    if bot_instance and bot_instance.running:
         bot_instance.stop()
         flash("Bot stopped.", "success")
     else:
@@ -167,7 +167,7 @@ def stop_bot():
 
 @app.route("/status")
 def status():
-    running = bool(bot_instance and bot_instance.is_running())
+    running = bool(bot_instance and bot_instance.running)
     return jsonify({"running": running})
 
 @app.route("/health")
