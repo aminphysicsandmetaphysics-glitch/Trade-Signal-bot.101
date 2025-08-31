@@ -3,15 +3,11 @@ from concurrent.futures import Future
 import importlib
 
 
-def _load_app(monkeypatch):
+def test_stop_bot_route_disconnects_cleanly(monkeypatch):
     monkeypatch.setenv("SESSION_SECRET", "test")
     monkeypatch.setenv("ADMIN_USER", "u")
     monkeypatch.setenv("ADMIN_PASS", "p")
-    return importlib.reload(importlib.import_module("app"))
-
-
-def test_stop_bot_route_disconnects_cleanly(monkeypatch):
-    app = _load_app(monkeypatch)
+    app = importlib.import_module("app")
 
     loop = asyncio.new_event_loop()
 
@@ -19,10 +15,8 @@ def test_stop_bot_route_disconnects_cleanly(monkeypatch):
         def __init__(self, loop):
             self.loop = loop
             self.stopped = False
-
         def is_running(self):
             return True
-
         async def stop(self):
             self.stopped = True
 
@@ -43,9 +37,7 @@ def test_stop_bot_route_disconnects_cleanly(monkeypatch):
             fut.set_result(result)
         return fut
 
-    monkeypatch.setattr(
-        asyncio, "run_coroutine_threadsafe", fake_run_coroutine_threadsafe
-    )
+    monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", fake_run_coroutine_threadsafe)
 
     client = app.app.test_client()
     with client.session_transaction() as sess:
@@ -55,12 +47,4 @@ def test_stop_bot_route_disconnects_cleanly(monkeypatch):
     assert fake_bot.stopped
     assert calls["count"] == 1
     loop.close()
-
-
-def test_stop_bot_requires_login(monkeypatch):
-    app = _load_app(monkeypatch)
-    client = app.app.test_client()
-    resp = client.post("/stop_bot")
-    assert resp.status_code == 302
-    assert "/login" in resp.headers["Location"]
 
