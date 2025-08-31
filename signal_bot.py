@@ -147,6 +147,12 @@ RR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Timeframe (TF)
+TF_RE = re.compile(
+    r"\b(?:TF|Time\s*Frame|Timeframe)\s*[:\-]?\s*([0-9]+[A-Za-z]+)",
+    re.IGNORECASE,
+)
+
 # حالت‌های پوزیشن
 POS_VARIANTS = [
     ("BUY LIMIT", "Buy Limit"),
@@ -491,6 +497,14 @@ def extract_rr(text: str) -> Optional[str]:
     m = RR_RE.search(text or "")
     if m:
         return f"{m.group(2)}/{m.group(3)}"
+    return None
+
+
+def extract_tf(text: str) -> Optional[str]:
+    """Extract timeframe (TF) string from *text*."""
+    m = TF_RE.search(text or "")
+    if m:
+        return m.group(1).upper()
     return None
 
 
@@ -1064,6 +1078,48 @@ def parse_signal(
 
     return parse_signal_classic(text, chat_id, profile=profile, return_meta=return_meta)
 
+# -----------------------------------------------------------------------------
+# Source-specific parsers
+# -----------------------------------------------------------------------------
+
+
+def _parse_with_tf(text: str):
+    """Helper to parse a message using classic rules and extract timeframe."""
+    parsed = parse_signal_classic(text, 0, {}, return_meta=True)
+    if not parsed:
+        return None
+    formatted, meta = parsed
+    tf = extract_tf(text)
+    if tf:
+        formatted += f"\n⏳ TF : {tf}"
+        meta["tf"] = tf
+    return formatted, meta
+
+
+def parse_gold_exclusive(text: str):
+    return _parse_with_tf(text)
+
+
+def parse_lingrid(text: str):
+    return _parse_with_tf(text)
+
+
+def parse_forex_rr(text: str):
+    return _parse_with_tf(text)
+
+
+def parse_message_by_source(text: str, source_name: str):
+    """Select parser based on *source_name* and return parsed result."""
+    name = (source_name or "").lower()
+    if "gold" in name and "exclusive" in name:
+        return parse_gold_exclusive(text)
+    if "lingrid" in name:
+        return parse_lingrid(text)
+    if "forex" in name and "rr" in name:
+        return parse_forex_rr(text)
+    return None
+
+
 # ----------------------------------------------------------------------------
 # Dedupe helper — اثرانگشت محتوا
 # ----------------------------------------------------------------------------
@@ -1358,7 +1414,15 @@ class SignalBot:
                 return
 
             profile = resolve_profile(int(event.chat_id))
-            parsed = parse_signal(text, event.chat_id, profile, return_meta=True)
+            source_name = ""
+            chat_obj = getattr(event, "chat", None)
+            if chat_obj is not None:
+                source_name = getattr(chat_obj, "title", "") or getattr(chat_obj, "username", "")
+            parsed = None
+            if source_name:
+                parsed = parse_message_by_source(text, source_name)
+            if not parsed:
+                parsed = parse_signal(text, event.chat_id, profile, return_meta=True)
             if not parsed:
                 log.info(f"Rejecting message from {event.chat_id}: {snippet}")
                 self.stats.increment("rejected")
