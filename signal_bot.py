@@ -161,20 +161,43 @@ def guess_position(text: str) -> Optional[str]:
     return None
 
 
-def extract_entry(lines: List[str]) -> Optional[str]:
-    # حالت‌های صریح Entry
+def classic_extract_entry(lines: List[str]) -> Optional[str]:
+    """Extract entry price using classic heuristics.
+
+    Priority is given to numbers that appear immediately after explicit
+    ``Entry``/``Price`` keywords.  As a fallback, numbers near position
+    keywords (``Buy``/``Sell``) are considered.  Any numbers following
+    ``TP``/``SL`` patterns are ignored to avoid false positives when all
+    values appear on a single line.
+    """
+
+    # 1) Explicit entry/price keywords
     for l in lines:
-        if any(k in l.lower() for k in ENTRY_KEYS):
-            m = NUM_RE.search(l)
-            if m:
-                return m.group(1)
-    # حالت فشرده مثل: "BUY 3373.33" یا "SELL LIMIT 3338"
+        ll = l.lower()
+        if any(k in ll for k in ENTRY_KEYS):
+            for nm in NUM_RE.finditer(l):
+                prefix = ll[: nm.start()]
+                if re.search(r"(tp\d*|take\s*profit\d*|sl|stop\s*loss)\s*$", prefix):
+                    continue
+                return nm.group(1)
+
+    # 2) Fallback to numbers near position keywords
     for l in lines:
-        if re.search(r"\b(BUY|SELL)(?:\s+(LIMIT|STOP))?\s+(-?\d+(?:\.\d+)?)\b", l, re.IGNORECASE):
-            m = re.search(r"(-?\d+(?:\.\d+)?)", l)
-            if m:
-                return m.group(1)
+        ll = l.lower()
+        if not re.search(r"\b(buy|sell)\b", ll):
+            continue
+        for nm in NUM_RE.finditer(l):
+            prefix = ll[: nm.start()]
+            if re.search(r"(tp\d*|take\s*profit\d*|sl|stop\s*loss)\s*$", prefix):
+                continue
+            if re.search(r"(buy|sell)(?:\s+(limit|stop))?\s*$", prefix):
+                return nm.group(1)
+
     return None
+
+
+# Backwards compatibility for older code/tests
+extract_entry = classic_extract_entry
 
 
 def extract_sl(lines: List[str]) -> Optional[str]:
