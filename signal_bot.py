@@ -122,6 +122,7 @@ TP_VALUE_RE = re.compile(
 UNITED_KINGS_CHAT_IDS = {
     -1001709190364,
     -1001642415461,
+    -1001234567890,
 }
 
 # United Kings specific regex patterns
@@ -130,10 +131,6 @@ UK_SELL_RE = re.compile(r"\b(?:sell|short)\b", re.IGNORECASE)
 # Entry is provided as a range separated by a dash ("@" optional, various unicode dashes)
 UK_RANGE_RE = re.compile(
     r"@?\s*(-?\d+(?:\.\d+)?)\s*[-\u2010-\u2015]\s*(-?\d+(?:\.\d+)?)"
-)
-# Heuristic hint: range preceded by '@' used to detect United Kings style
-UK_RANGE_WITH_AT_RE = re.compile(
-    r"@\s*-?\d+(?:\.\d+)?\s*[-\u2010-\u2015]\s*-?\d+(?:\.\d+)?"
 )
 UK_SL_RE = re.compile(r"\bS\s*L\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
 UK_TP_RE = re.compile(r"\bT\s*P\s*\d*\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
@@ -461,11 +458,11 @@ def _looks_like_united_kings(text: str) -> bool:
     joined = " ".join(lines)
     if re.search(r"united\s+kings", joined, re.IGNORECASE):
         return True
-    return (
-        UK_RANGE_WITH_AT_RE.search(joined)
-        and UK_SL_RE.search(joined)
-        and UK_TP_RE.search(joined)
-    )
+    has_range = any(UK_RANGE_RE.search(l) and "entry" not in l.lower() for l in lines)
+    has_sl = any(UK_SL_RE.search(l) for l in lines)
+    has_tp = any(UK_TP_RE.search(l) for l in lines)
+    has_pos = any(UK_BUY_RE.search(l) or UK_SELL_RE.search(l) for l in lines)
+    return has_range and has_sl and has_tp and has_pos
 
 
 def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
@@ -477,9 +474,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     if not lines:
         log.info("IGNORED (empty)")
         return None
-
-    joined = " ".join(lines)
-    symbol = guess_symbol(joined) or ""
+    symbol = "XAUUSD"
 
     position = ""
     if any(UK_BUY_RE.search(l) for l in lines):
