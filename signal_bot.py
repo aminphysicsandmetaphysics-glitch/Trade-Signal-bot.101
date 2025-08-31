@@ -51,8 +51,43 @@ from telethon.sessions import StringSession
 
 # نمادها/سیمبل‌ها
 PAIR_RE = re.compile(
-    r"(#?\b(?:XAUUSD|XAGUSD|GOLD|SILVER|USOIL|UKOIL|[A-Z]{3,5}[/ ]?[A-Z]{3,5}|[A-Z]{3,5}USD|USD[A-Z]{3,5})\b)"
+    r"(?:#)?(XAUUSD|XAGUSD|USOIL|[A-Z]{3}/[A-Z]{3}|[A-Z]{6})\b"
 )
+
+# Supported currency codes for validating symbol guesses
+CURRENCY_CODES = {
+    "USD",
+    "EUR",
+    "GBP",
+    "AUD",
+    "CAD",
+    "NZD",
+    "CHF",
+    "JPY",
+    "BTC",
+    "ETH",
+    "LTC",
+    "XAU",
+    "XAG",
+    "SGD",
+    "HKD",
+    "NOK",
+    "SEK",
+    "ZAR",
+    "TRY",
+    "RUB",
+    "CNY",
+    "CNH",
+    "MXN",
+    "BRL",
+    "INR",
+    "SAR",
+    "AED",
+    "PLN",
+}
+
+# Known non-FX instruments matched directly
+KNOWN_INSTRUMENTS = {"XAUUSD", "XAGUSD", "USOIL"}
 # عدد
 NUM_RE = re.compile(r"(-?\d+(?:\.\d+)?)")
 # R/R
@@ -183,9 +218,13 @@ def guess_symbol(text: str) -> Optional[str]:
     if not m:
         return None
     sym = m.group(1).upper().lstrip("#").replace(" ", "").replace("/", "")
-    if sym == "GOLD":
-        sym = "XAUUSD"
-    return sym
+    if sym in KNOWN_INSTRUMENTS:
+        return sym
+    if len(sym) == 6:
+        base, quote = sym[:3], sym[3:]
+        if base in CURRENCY_CODES and quote in CURRENCY_CODES:
+            return sym
+    return None
 
 
 def guess_position(text: str) -> Optional[str]:
