@@ -587,7 +587,7 @@ def _strip_noise_lines(lines: list[str]) -> list[str]:
 
 
 def is_valid(signal: Dict) -> bool:
-    entry_or_range = signal.get("entry") or signal.get("extra", {}).get("entries", {}).get("range")
+    entry_or_range = signal.get("entry") or signal.get("entry_range")
     return all([
         signal.get("symbol"),
         signal.get("position"),
@@ -602,11 +602,18 @@ def validate_directional_consistency(signal: Dict) -> bool:
     For ``BUY`` signals every take-profit target must be strictly above the
     entry price while the stop loss must be below it.  ``SELL`` signals require
     the opposite relationship.  If values cannot be parsed as floats the
-    function defaults to ``True`` leaving validation to other layers.
+    function defaults to ``True`` leaving validation to other layers.  When an
+    entry range is supplied the lower bound is used for stop-loss validation and
+    the upper bound for take-profit checks.
     """
 
     try:
-        entry = float(signal.get("entry"))
+        if signal.get("entry_range"):
+            lo, hi = sorted(float(x) for x in signal["entry_range"])
+            entry = (lo + hi) / 2
+        else:
+            entry = float(signal.get("entry"))
+            lo = hi = entry
         sl = float(signal.get("sl"))
         tps = [float(tp) for tp in signal.get("tps", [])]
     except Exception:
@@ -614,25 +621,25 @@ def validate_directional_consistency(signal: Dict) -> bool:
 
     pos = (signal.get("position") or "").upper()
     if pos.startswith("BUY"):
-        if sl >= entry:
+        if sl >= lo:
             log.info(
-                f"IGNORED (buy but SL {signal['sl']} >= entry {signal['entry']})"
+                f"IGNORED (buy but SL {signal['sl']} >= entry {lo})",
             )
             return False
-        if any(tp <= entry for tp in tps):
+        if any(tp <= hi for tp in tps):
             log.info(
-                f"IGNORED (buy but TP {tps[0]} <= entry {signal['entry']})"
+                f"IGNORED (buy but TP {tps[0]} <= entry {hi})",
             )
             return False
     elif pos.startswith("SELL"):
-        if sl <= entry:
+        if sl <= lo:
             log.info(
-                f"IGNORED (sell but SL {signal['sl']} <= entry {signal['entry']})"
+                f"IGNORED (sell but SL {signal['sl']} <= entry {lo})",
             )
             return False
-        if any(tp >= entry for tp in tps):
+        if any(tp >= lo for tp in tps):
             log.info(
-                f"IGNORED (sell but TP {tps[0]} >= entry {signal['entry']})"
+                f"IGNORED (sell but TP {tps[0]} >= entry {lo})",
             )
             return False
     return True
@@ -657,7 +664,7 @@ def to_unified(signal: Dict, chat_id: int, extra: Optional[Dict] = None) -> str:
     if rr:
         parts.append(f"❗️ R/R : {rr}")
 
-    entry_range = extra.get("entries", {}).get("range")
+    entry_range = signal.get("entry_range")
     if entry_range:
         if not show_range_only:
             parts.append(f"💲 Entry Price : {signal['entry']}")
@@ -893,17 +900,18 @@ def parse_signal_united_kings(
     if not rr:
         rr = calculate_rr(calc_entry, sl, tps[0])
 
-    extra = {
-        "entries": {"range": entry_range},
-        "show_entry_range_only": True,
-    }
+    extra = {"show_entry_range_only": True}
     signal = {
         "symbol": symbol,
         "position": position,
-        "entry": None,
+        "entry": calc_entry,
         "sl": sl,
         "tps": tps,
         "rr": rr,
+        "source": None,
+        "tf": None,
+        "entry_range": entry_range,
+        "notes": [],
         "extra": extra,
     }
 
@@ -911,7 +919,7 @@ def parse_signal_united_kings(
         return None, "invalid"
     if not validate_directional_consistency(signal):
         return None, "invalid"
-    if not _validate_tp_sl(position, calc_entry, sl, tps, tuple(entry_range)):
+    if not _validate_tp_sl(position, calc_entry, sl, tps, tuple(signal["entry_range"])):
         return None, "invalid"
 
     if return_meta:
@@ -919,7 +927,9 @@ def parse_signal_united_kings(
     return to_unified(signal, chat_id, extra), None
 
 
-def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
+def parse_channel_four(
+    text: str, chat_id: int, *, return_meta: bool = False
+) -> Optional[Union[str, Tuple[str, Dict[str, Any]]]]:
     """Parser for Channel Four style messages supporting entry ranges."""
     if looks_like_update(text):
         log.info("IGNORED (update/noise)")
@@ -960,20 +970,25 @@ def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
         "sl": sl,
         "tps": tps,
         "rr": rr,
+        "source": None,
+        "tf": None,
+        "entry_range": list(entry_range) if entry_range else None,
+        "notes": [],
         "extra": {},
     }
-    if entry_range:
-        signal["extra"]["entries"] = {"range": entry_range}
 
     if not is_valid(signal):
         log.info(f"IGNORED (invalid) -> {signal}")
         return None
     if not validate_directional_consistency(signal):
         return None
-    if not _validate_tp_sl(position, entry, sl, tps, entry_range):
+    if not _validate_tp_sl(position, entry, sl, tps, signal.get("entry_range")):
         return None
 
-    return to_unified(signal, chat_id, signal.get("extra", {}))
+    result = to_unified(signal, chat_id, signal.get("extra", {}))
+    if return_meta:
+        return result, signal
+    return result
 
 
 def parse_gold_exclusive(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -1047,7 +1062,7 @@ def parse_signal_classic(
     if _has_entry_range(text):
         if profile.get("allow_entry_range"):
             try:
-                return parse_channel_four(text, chat_id)
+                return parse_channel_four(text, chat_id, return_meta=return_meta)
             except Exception as e:
                 log.debug(f"Entry range parser failed: {e}")
                 return None
@@ -1074,6 +1089,11 @@ def parse_signal_classic(
         "sl": sl,
         "tps": tps,
         "rr": rr,
+        "source": None,
+        "tf": None,
+        "entry_range": None,
+        "notes": [],
+        "extra": {},
     }
 
     if not is_valid(signal):

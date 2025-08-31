@@ -88,8 +88,10 @@ def test_united_kings_entry_range_assignment(monkeypatch):
     message = """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1915\nSL : 1890\n"""
     parse_signal_united_kings(message, 1234)
 
-    assert captured["signal"]["entry"] is None
-    assert captured["extra"]["entries"]["range"] == ["1900", "1910"]
+    assert captured["signal"]["entry_range"] == ["1900", "1910"]
+    assert captured["signal"]["source"] is None
+    assert captured["signal"]["tf"] is None
+    assert captured["signal"]["notes"] == []
     assert captured["extra"].get("show_entry_range_only") is True
 
 
