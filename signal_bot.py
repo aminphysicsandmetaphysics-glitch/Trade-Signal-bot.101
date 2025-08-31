@@ -147,6 +147,10 @@ RR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Timeframe and high-risk detectors used by channel-specific parsers
+TF_RE = re.compile(r"\bTF[:\s]*([0-9A-Za-z]+)\b", re.IGNORECASE)
+HIGH_RISK_RE = re.compile(r"\bHIGH[-\s]*RISK\b", re.IGNORECASE)
+
 # حالت‌های پوزیشن
 POS_VARIANTS = [
     ("BUY LIMIT", "Buy Limit"),
@@ -494,6 +498,14 @@ def extract_rr(text: str) -> Optional[str]:
     return None
 
 
+def extract_tf(text: str) -> Optional[str]:
+    """Extract timeframe indicator like '15M' or 'H1' if present."""
+    m = TF_RE.search(text or "")
+    if m:
+        return m.group(1).upper()
+    return None
+
+
 def calculate_rr(entry: str, sl: str, tp: str) -> Optional[str]:
     """Calculate risk/reward ratio from entry, stop loss and first take profit."""
     try:
@@ -785,7 +797,9 @@ def _validate_tp_sl(
     return True
 
 
-def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], Optional[str]]:
+def parse_signal_united_kings(
+    text: str, chat_id: int, *, return_meta: bool = False
+) -> Tuple[Optional[Union[str, Dict[str, Any]]], Optional[str]]:
     """Parse a United Kings style signal.
 
     Parameters
@@ -900,6 +914,8 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Tuple[Optional[str], O
     if not _validate_tp_sl(position, calc_entry, sl, tps, tuple(entry_range)):
         return None, "invalid"
 
+    if return_meta:
+        return signal, None
     return to_unified(signal, chat_id, extra), None
 
 
@@ -959,6 +975,51 @@ def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
 
     return to_unified(signal, chat_id, signal.get("extra", {}))
 
+
+def parse_gold_exclusive(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Parse messages from the 'Gold Exclusive' channel."""
+    text = normalize_numbers(text)
+    base = f"#XAUUSD\n{text}"
+    parsed = parse_signal_classic(base, 0, {}, return_meta=True)
+    if not parsed:
+        return None, "invalid"
+    _, meta = parsed
+    tf = extract_tf(text)
+    if tf:
+        meta["tf"] = tf
+    if HIGH_RISK_RE.search(text):
+        meta["high_risk"] = True
+    return meta, None
+
+
+def parse_lingrid(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Parse messages from the 'Lingrid' channel."""
+    text = normalize_numbers(text)
+    parsed = parse_signal_classic(text, 0, {}, return_meta=True)
+    if not parsed:
+        return None, "invalid"
+    _, meta = parsed
+    tf = extract_tf(text)
+    if tf:
+        meta["tf"] = tf
+    if HIGH_RISK_RE.search(text):
+        meta["high_risk"] = True
+    return meta, None
+
+
+def parse_forex_rr(text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Parse messages from the 'Forex RR' channel."""
+    text = normalize_numbers(text)
+    parsed = parse_signal_classic(text, 0, {}, return_meta=True)
+    if not parsed:
+        return None, "invalid"
+    _, meta = parsed
+    tf = extract_tf(text)
+    if tf:
+        meta["tf"] = tf
+    if HIGH_RISK_RE.search(text):
+        meta["high_risk"] = True
+    return meta, None
 
 def parse_signal_classic(
     text: str,
@@ -1063,6 +1124,33 @@ def parse_signal(
             return parse_signal_classic(text, chat_id, profile=profile, return_meta=return_meta)
 
     return parse_signal_classic(text, chat_id, profile=profile, return_meta=return_meta)
+
+
+def parse_message_by_source(
+    text: str, source_name: str
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Select parser based on *source_name*.
+
+    The message text is normalised and stripped of noisy lines before being
+    routed to a channel-specific parser.
+    """
+    text = normalize_numbers(text)
+    lines = _strip_noise_lines((text or "").splitlines())
+    text = "\n".join(lines)
+    if not text:
+        return None, "empty"
+
+    name = (source_name or "").lower()
+    if "united" in name and "kings" in name:
+        return parse_signal_united_kings(text, 0, return_meta=True)
+    if "gold" in name and "exclusive" in name:
+        return parse_gold_exclusive(text)
+    if "lingrid" in name:
+        return parse_lingrid(text)
+    if "forex" in name and "rr" in name:
+        return parse_forex_rr(text)
+
+    return None, "unknown source"
 
 # ----------------------------------------------------------------------------
 # Dedupe helper — اثرانگشت محتوا
