@@ -246,10 +246,12 @@ TP_VALUE_RE = re.compile(
 
 # Direction synonyms used across parsers
 BUY_SYNONYMS = re.compile(
-    r"\b(?:buy|long|go\s+long|grab\s+long)\b", re.IGNORECASE
+    r"\b(?:buy|long|go\s+long|grab(?:\s+long)?|purchase|acquire|accumulate|pick\s*up|load\s*up)\b",
+    re.IGNORECASE,
 )
 SELL_SYNONYMS = re.compile(
-    r"\b(?:sell|short|go\s+short|offload)\b", re.IGNORECASE
+    r"\b(?:sell|short|go\s+short|offload|unload|dump|liquidate|dispose)\b",
+    re.IGNORECASE,
 )
 
 # Special-case parsing for the "United Kings" channels

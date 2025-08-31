@@ -97,13 +97,31 @@ def test_united_kings_missing_position_logged(caplog):
     assert "no position" in caplog.text.lower()
 
 
-def test_united_kings_buy_synonym():
-    message = """#XAUUSD\ngrab long\n@1900-1910\nTP1 : 1915\nSL : 1890\n"""
+def test_united_kings_buy_synonym_grab():
+    message = """#XAUUSD\ngrab\n@1900-1910\nTP1 : 1915\nSL : 1890\n"""
     result = parse_signal_united_kings(message, 1234)
     assert result and "Position: Buy" in result
 
 
-def test_united_kings_sell_synonym():
+def test_united_kings_buy_synonym_purchase():
+    message = """#XAUUSD\npurchase\n@1900-1910\nTP1 : 1915\nSL : 1890\n"""
+    result = parse_signal_united_kings(message, 1234)
+    assert result and "Position: Buy" in result
+
+
+def test_united_kings_sell_synonym_offload():
     message = """#XAUUSD\noffload\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
+    result = parse_signal_united_kings(message, 1234)
+    assert result and "Position: Sell" in result
+
+
+def test_united_kings_sell_synonym_unload():
+    message = """#XAUUSD\nunload\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
+    result = parse_signal_united_kings(message, 1234)
+    assert result and "Position: Sell" in result
+
+
+def test_united_kings_sell_synonym_dump():
+    message = """#XAUUSD\ndump\n@1900-1910\nTP1 : 1890\nSL : 1915\n"""
     result = parse_signal_united_kings(message, 1234)
     assert result and "Position: Sell" in result
