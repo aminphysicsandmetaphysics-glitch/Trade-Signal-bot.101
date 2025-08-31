@@ -7,6 +7,8 @@ def test_classic_extract_tps_mixed_content():
         "Target 1.4000 / 1.5000 and 50 pips",
         "Random line 1.0000",
         "TP3: 1.4567 80 pips 1.5678",
+        "TP4: 1.6000 30 pts 1.7000",
+        "TP5: 1.8000 1% 1.9000",
     ]
     assert classic_extract_tps(lines) == [
         "1.2345",
@@ -15,4 +17,8 @@ def test_classic_extract_tps_mixed_content():
         "1.5000",
         "1.4567",
         "1.5678",
+        "1.6000",
+        "1.7000",
+        "1.8000",
+        "1.9000",
     ]

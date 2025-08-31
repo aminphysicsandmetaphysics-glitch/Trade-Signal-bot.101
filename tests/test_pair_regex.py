@@ -10,9 +10,10 @@ def test_invalid_words_not_matched(text):
 @pytest.mark.parametrize(
     "text,expected",
     [
-        ("#XAUUSD", "XAUUSD"),
         ("GOLD", "XAUUSD"),
-        ("BTC USDT", "BTCUSDT"),
+        ("BTCUSDT", "BTCUSDT"),
+        ("#XAUUSD", "XAUUSD"),
+        ("XAU USD", "XAUUSD"),
         ("XAU/USD", "XAUUSD"),
     ],
 )

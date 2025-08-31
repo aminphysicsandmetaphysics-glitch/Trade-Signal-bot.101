@@ -12,3 +12,9 @@ def test_normalize_numbers_farsi_with_separators():
 
 def test_normalize_numbers_arabic_with_separators():
     assert normalize_numbers("١٬٢٣٤٬٥٦٧٫٨٩") == "1234567.89"
+
+
+def test_normalize_numbers_with_emojis_and_farsi_separators():
+    text = "📈۱٬۲۳۴٬۵۶۷٫۸۹📉"
+    assert normalize_numbers(text) == "📈1234567.89📉"
+    assert normalize_numbers("💰۱۲۳۴۵۶💎") == "💰123456💎"
