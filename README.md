@@ -50,7 +50,7 @@ README.md            # This file
    python app.py
    ```
 
-4. Open http://127.0.0.1:5000 in your browser and fill in your API ID, API hash, session string, source channels and destination channels.  Click **Start Bot** to begin forwarding.
+4. Open http://127.0.0.1:5000 in your browser and fill in your API ID, API hash, session string, source channels and destination channels. Optionally provide channel IDs in **skip_rr_channels** to suppress R/R values for those chats. Click **Start Bot** to begin forwarding.
 
 ## Deploying to Render
 
@@ -67,6 +67,7 @@ README.md            # This file
    * `API_HASH` – your Telegram API hash.
    * `SOURCES` – a JSON array of source channel usernames or numeric IDs (e.g. `["@sourceA", -1001234567890]`).
    * `DESTS` – a JSON array of destination channel usernames or numeric IDs.
+   * `SKIP_RR_CHANNELS` – optional JSON array or comma-separated list of channel IDs for which risk/reward should be omitted.
    * `SESSION_STRING` – the session string generated earlier.
 
 5. Deploy the service.  Once running, visit `/` to configure the bot if you have not set environment variables.  The dashboard allows you to start and stop the bot without redeploying.
