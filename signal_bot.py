@@ -52,11 +52,9 @@ from telethon.sessions import StringSession
 
 # نمادها/سیمبل‌ها
 # Match optional hashtag followed by either a single token alias or a
-# pair of tokens separated by a space or slash. Delimiters are stripped
-# during normalisation. Newlines are not considered valid delimiters.
-PAIR_RE = re.compile(
-    r"(?:#)?([A-Z]{3,6}(?: */ *[A-Z]{3,6}| [A-Z]{3,6})?)(?=\b|\d)"
-)
+# pair of tokens separated by a slash. Delimiters are stripped during
+# normalisation.
+PAIR_RE = re.compile(r"(?:#)?([A-Z]{3}/[A-Z]{3,6}|[A-Z]{3,6})\b")
 
 # Supported currency codes for validating symbol guesses
 CURRENCY_CODES = {
@@ -807,6 +805,9 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
         log.info("IGNORED (empty)")
         return None
     symbol = normalize_symbol("XAUUSD")
+    if not symbol:
+        log.info("IGNORED (no symbol)")
+        return None
 
     position = ""
     if any(BUY_SYNONYMS.search(l) for l in lines):
@@ -903,6 +904,9 @@ def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
         return None
 
     symbol = normalize_symbol(guess_symbol(text) or "")
+    if not symbol:
+        log.info("IGNORED (no symbol)")
+        return None
     position = guess_position(text) or ""
     entry = extract_entry(lines) or ""
     sl = extract_sl(lines) or ""
@@ -990,6 +994,9 @@ def parse_signal(
             return None
 
     symbol = normalize_symbol(guess_symbol(text) or "")
+    if not symbol:
+        log.info("IGNORED (no symbol)")
+        return None
     position = guess_position(text) or ""
     entry = extract_entry(lines) or ""
     sl = extract_sl(lines) or ""
