@@ -148,6 +148,7 @@ UK_NOISE_LINES = [
 ENTRY_RANGE_RE = re.compile(r"(-?\d+(?:\.\d+)?)[^0-9]+(-?\d+(?:\.\d+)?)")
 
 # Mapping of chat IDs to profile options controlling parsing behaviour.
+# Example: {1234: {"allow_entry_range": True, "show_entry_range_only": True}}
 CHANNEL_PROFILES: Dict[int, Dict[str, Any]] = {}
 
 
@@ -386,6 +387,10 @@ def has_entry_range(lines: List[str]) -> bool:
 
 def to_unified(signal: Dict, chat_id: int, extra: Optional[Dict] = None) -> str:
     extra = extra if extra is not None else signal.get("extra", {})
+    profile = resolve_profile(chat_id)
+    show_range_only = extra.get("show_entry_range_only")
+    if show_range_only is None:
+        show_range_only = profile.get("show_entry_range_only")
 
     parts: List[str] = []
     parts.append(f"📊 #{signal['symbol']}")
@@ -393,15 +398,18 @@ def to_unified(signal: Dict, chat_id: int, extra: Optional[Dict] = None) -> str:
     rr = signal.get("rr")
     if rr:
         parts.append(f"❗️ R/R : {rr}")
-    parts.append(f"💲 Entry Price : {signal['entry']}")
-    
+
     entry_range = extra.get("entries", {}).get("range")
     if entry_range:
+        if not show_range_only:
+            parts.append(f"💲 Entry Price : {signal['entry']}")
         try:
             lo, hi = entry_range
             parts.append(f"🎯 Entry Range : {lo} – {hi}")
         except Exception:
             pass
+    else:
+        parts.append(f"💲 Entry Price : {signal['entry']}")
 
     for i, tp in enumerate(signal["tps"], 1):
         parts.append(f"✔️ TP{i} : {tp}")
