@@ -158,9 +158,8 @@ TP_VALUE_RE = re.compile(
 # Special-case parsing for the "United Kings" channels
 # (IDs taken from known public channels)
 UNITED_KINGS_CHAT_IDS = {
-    -1001709190364,
-    -1001642415461,
-    -1001234567890,
+    -1002223574325,
+    -1002709043208,
 }
 
 # United Kings specific regex patterns

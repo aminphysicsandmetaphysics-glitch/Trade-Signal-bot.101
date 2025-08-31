@@ -1,6 +1,6 @@
 from signal_bot import parse_signal, _looks_like_united_kings, UNITED_KINGS_CHAT_IDS
 
-NEW_CHAT_ID = -1001234567890
+NEW_CHAT_ID = -1002223574325
 
 MESSAGE = """Buy
 1900-1910
@@ -12,8 +12,8 @@ SL : 1890
 EXPECTED = """\
 📊 #XAUUSD
 📉 Position: Buy
-❗️ R/R : 1.5/1
-💲 Entry Price : 1905
+❗️ R/R : 1/1.5
+💲 Entry Price : 1900
 🎯 Entry Range : 1900 – 1910
 ✔️ TP1 : 1915
 ✔️ TP2 : 1920

@@ -78,7 +78,7 @@ Visit `/login` and enter the credentials to access protected routes like
 
    * `API_ID` – your Telegram API ID.
    * `API_HASH` – your Telegram API hash.
-   * `SOURCES` – a JSON array of source channel usernames or numeric IDs (e.g. `["@sourceA", -1001234567890]`).
+   * `SOURCES` – a JSON array of source channel usernames or numeric IDs (e.g. `["@sourceA", -1002223574325]`).
    * `DESTS` – a JSON array of destination channel usernames or numeric IDs.
    * `SESSION_STRING` – the session string generated earlier.
    * `SESSION_SECRET` – random string for Flask session security.
