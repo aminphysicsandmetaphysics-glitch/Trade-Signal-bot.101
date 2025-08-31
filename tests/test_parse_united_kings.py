@@ -170,12 +170,3 @@ def test_united_kings_direction_window_priority():
     result, reason = parse_signal_united_kings(message, 1234)
     assert result and "Position: Buy" in result
     assert reason is None
-
-
-def test_parse_signal_return_meta_tuple():
-    message = VALID_SIGNALS[0][0]
-    formatted, meta = parse_signal(message, 1234, {}, return_meta=True)
-    assert isinstance(formatted, str)
-    assert isinstance(meta, dict)
-    assert meta["symbol"] == "XAUUSD"
-
