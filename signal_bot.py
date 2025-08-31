@@ -55,6 +55,9 @@ from telethon.sessions import StringSession
 # pair of tokens separated by a slash. Delimiters are stripped during
 # normalisation.
 PAIR_RE = re.compile(r"(?:#)?([A-Z]{3}/[A-Z]{3,6}|[A-Z]{3,6})\b")
+# Allow hashtags with optional space before the token and optional pair
+# separated by a slash
+HASHTAG_PAIR_RE = re.compile(r"#\s*([A-Za-z]{3,6})(?:/([A-Za-z]{3,6}))?\b")
 
 # Supported currency codes for validating symbol guesses
 CURRENCY_CODES = {
@@ -341,11 +344,36 @@ def normalize_numbers(text: str) -> str:
     return text
 
 
+def strip_invisibles(text: str) -> str:
+    """Remove BIDI marks and non-breaking spaces."""
+    if not text:
+        return ""
+    invisibles = dict.fromkeys(
+        map(ord, "\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u00a0\u202f")
+    )
+    return text.translate(invisibles)
+
+
 def guess_symbol(text: str) -> Optional[str]:
-    m = PAIR_RE.search((text or "").upper())
-    if not m:
-        return None
-    sym = normalize_symbol(m.group(1))
+    cleaned = strip_invisibles(text or "")
+    up = cleaned.upper()
+    m = PAIR_RE.search(up)
+    token = None
+    if m:
+        token = m.group(1)
+    else:
+        hm = HASHTAG_PAIR_RE.search(cleaned)
+        if hm:
+            base = hm.group(1).upper()
+            quote = (hm.group(2) or "").upper()
+            token = base + quote
+        else:
+            parts = cleaned.strip().split()
+            if parts:
+                token = parts[0]
+            else:
+                return None
+    sym = normalize_symbol(token)
     if sym in KNOWN_INSTRUMENTS or sym in ALIAS_MAP.values():
         return sym
     if len(sym) == 6:
