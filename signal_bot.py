@@ -190,6 +190,7 @@ NON_SIGNAL_HINTS = [
     "tp hit",
     "sl reached",
     "sl hit",
+    "hit sl",
     "profits",
     "week",
     "friday",
@@ -209,6 +210,7 @@ NON_SIGNAL_HINTS = [
     "اسکرین شات",
     "اسکرینشات",
     "تبریک",
+    "اشتراک",
 ]
 
 # الگوی حذف ایموجی‌ها قبل از بررسی کلیدواژه‌ها
