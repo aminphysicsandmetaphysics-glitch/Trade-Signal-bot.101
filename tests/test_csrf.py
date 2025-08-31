@@ -1,11 +1,19 @@
 import importlib
+import tempfile
+
 import pytest
+
+from profiles import ProfileStore
 
 
 def _load_app(monkeypatch):
     monkeypatch.setenv("SESSION_SECRET", "test")
-    app = importlib.reload(importlib.import_module("app"))
-    return app
+    app_module = importlib.reload(importlib.import_module("app"))
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    tmp.close()
+    app_module.profiles_store = ProfileStore(tmp.name)
+    app_module._load_profiles_into_channel_profiles()
+    return app_module
 
 
 @pytest.mark.parametrize(

@@ -1,10 +1,8 @@
-from pathlib import Path
-
 from profiles import ChannelProfile, ProfileStore
 
 
 def test_profile_crud(tmp_path):
-    store = ProfileStore(tmp_path / "profiles.yaml")
+    store = ProfileStore(tmp_path / "profiles.json")
     profile = ChannelProfile(
         id="p1",
         name="Profile 1",
