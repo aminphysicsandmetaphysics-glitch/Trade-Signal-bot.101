@@ -291,25 +291,27 @@ def parse_signal_united_kings(
 
 
 def parse_signal(text: str, chat_id: int, skip_rr_for: Iterable[int] = ()) -> Optional[str]:
-        text = normalize_numbers(text)
-        # Special-case: United Kings parser (if available)
+    text = normalize_numbers(text)
+    # Special-case: United Kings parser (if available)
+    uk_ids: set[int] = set()
+    looks_uk = None
+    parse_uk = None
     try:
         uk_ids = set(globals().get("UNITED_KINGS_CHAT_IDS", []))
         looks_uk = globals().get("_looks_like_united_kings")
         parse_uk = globals().get("parse_signal_united_kings")
-        if parse_uk and ((chat_id in uk_ids) or (looks_uk and looks_uk(text))):
-            res = parse_uk(text, chat_id, skip_rr_for)
-            if res is not None:
-                return res
     except Exception as e:
         log.debug(f"United Kings parser failed: {e}")
 
-    # حذف پیام‌های غیرسیگنال (آپدیت/تبلیغ/نتیجه)
-        if chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text):
-        formatted = parse_signal_united_kings(text, chat_id, skip_rr_for)
-        if formatted:
-            return formatted
+    if parse_uk and (chat_id in uk_ids or (looks_uk and looks_uk(text))):
+        try:
+            res = parse_uk(text, chat_id, skip_rr_for)
+            if res is not None:
+                return res
+        except Exception as e:
+            log.debug(f"United Kings parser failed: {e}")
 
+    # حذف پیام‌های غیرسیگنال (آپدیت/تبلیغ/نتیجه)
     if looks_like_update(text):
         log.info("IGNORED (update/noise)")
         return None
