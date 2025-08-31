@@ -1,5 +1,6 @@
 import pytest
-from signal_bot import parse_signal
+import signal_bot
+from signal_bot import parse_signal, parse_signal_united_kings
 
 # Sample United Kings messages
 VALID_SIGNALS = [
@@ -11,12 +12,12 @@ VALID_SIGNALS = [
     (
         """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1915\nTP2 : 1920\nSL : 1890\n""",
         """\
-📊 #XAUUSD\n📉 Position: Buy\n❗️ R/R : 1.5/1\n💲 Entry Price : 1905\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1915\n✔️ TP2 : 1920\n🚫 Stop Loss : 1890""",
+📊 #XAUUSD\n📉 Position: Buy\n❗️ R/R : 1/1.5\n💲 Entry Price : 1900\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1915\n✔️ TP2 : 1920\n🚫 Stop Loss : 1890""",
     ),
     (
         """#XAUUSD\nSell\n@1900-1910\nTP1 : 1890\nTP2 : 1880\nSL : 1910\n""",
         """\
-📊 #XAUUSD\n📉 Position: Sell\n❗️ R/R : 1/3\n💲 Entry Price : 1905\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1890\n✔️ TP2 : 1880\n🚫 Stop Loss : 1910""",
+📊 #XAUUSD\n📉 Position: Sell\n❗️ R/R : 1/1\n💲 Entry Price : 1900\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1890\n✔️ TP2 : 1880\n🚫 Stop Loss : 1910""",
     ),
 ]
 
@@ -26,8 +27,8 @@ INVALID_SIGNALS = [
     """#XAUUSD\nBuy\nEntry Price : 1900\nTP1 : 1910\nTP2 : 1890\nStop Loss : 1895\n""",
     # Mixed TP directions (sell with TP above entry)
     """#XAUUSD\nSell\nEntry Price : 1900\nTP1 : 1890\nTP2 : 1910\nStop Loss : 1915\n""",
-    # Range with TP below midpoint for buy
-    """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1903\nTP2 : 1915\nSL : 1890\n""",
+    # Range with TP below entry for buy
+    """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1895\nTP2 : 1915\nSL : 1890\n""",
     # Range with TP above midpoint for sell
     """#XAUUSD\nSell\n@1900-1910\nTP1 : 1912\nTP2 : 1890\nSL : 1915\n""",
 ]
@@ -50,3 +51,20 @@ def test_parse_united_kings_invalid(message):
 @pytest.mark.parametrize("message", NOISE_MESSAGES)
 def test_parse_united_kings_noise(message):
     assert parse_signal(message, 1234, {}) is None
+
+
+def test_united_kings_entry_range_assignment(monkeypatch):
+    captured = {}
+
+    def fake_to_unified(signal, chat_id, extra):
+        captured["signal"] = signal
+        captured["extra"] = extra
+        return "OK"
+
+    monkeypatch.setattr(signal_bot, "to_unified", fake_to_unified)
+
+    message = """#XAUUSD\nBuy\n@1900-1910\nTP1 : 1915\nSL : 1890\n"""
+    parse_signal_united_kings(message, 1234)
+
+    assert captured["signal"]["entry"] == "1900"
+    assert captured["extra"]["entries"]["range"] == ["1900", "1910"]
