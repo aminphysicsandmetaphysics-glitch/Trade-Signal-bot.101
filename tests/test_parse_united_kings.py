@@ -68,3 +68,28 @@ def test_united_kings_entry_range_assignment(monkeypatch):
 
     assert captured["signal"]["entry"] == "1900"
     assert captured["extra"]["entries"]["range"] == ["1900", "1910"]
+
+
+def test_united_kings_range_bypass_on_parser_failure():
+    """Even if the United Kings parser cannot handle the message, the
+    generic parser should still be attempted and not reject solely because
+    an entry range is present for a known United Kings channel."""
+
+    message = (
+        "#XAUUSD\n"
+        "Buy\n"
+        "Entry Price: 1905\n"
+        "@1900-1910\n"
+        "Take Profit 1: 1915\n"
+        "Stop Loss: 1890\n"
+    )
+
+    # Ensure specialised parser fails (missing 'SL'/'TP' tokens expected by it)
+    uk_id = next(iter(signal_bot.UNITED_KINGS_CHAT_IDS))
+    assert parse_signal_united_kings(message, uk_id) is None
+
+    # For known United Kings chat IDs the range should not trigger rejection
+    assert parse_signal(message, uk_id, {}) is not None
+
+    # A non-United Kings channel still rejects due to entry range
+    assert parse_signal(message, 1234, {}) is None

@@ -743,13 +743,15 @@ def parse_signal(
         return None
 
     if _has_entry_range(text):
-        if profile.get("allow_entry_range"):
+        if profile.get("allow_entry_range") or chat_id in UNITED_KINGS_CHAT_IDS:
             try:
                 res = parse_channel_four(text, chat_id)
                 if res is not None:
                     return res
             except Exception as e:
                 log.debug(f"Entry range parser failed: {e}")
+            # If parsing fails for known United Kings channels, fall back to
+            # generic parsing instead of rejecting solely due to the range.
         else:
             log.info("IGNORED (entry range not allowed)")
             return None
