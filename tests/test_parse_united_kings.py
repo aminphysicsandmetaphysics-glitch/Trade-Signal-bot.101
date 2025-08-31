@@ -16,9 +16,9 @@ VALID_SIGNALS = [
 📊 #XAUUSD\n📉 Position: Buy\n❗️ R/R : 1/1.5\n💲 Entry Price : 1900.0\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1915\n✔️ TP2 : 1920\n🚫 Stop Loss : 1890""",
     ),
     (
-        """#XAUUSD\nSell gold\n@1900-1910\nTP1 : 1890\nTP2 : 1880\nSL : 1910\n""",
+        """#XAUUSD\nSell gold\n@1900-1910\nTP1 : 1890\nTP2 : 1880\nSL : 1915\n""",
         """\
-📊 #XAUUSD\n📉 Position: Sell\n❗️ R/R : 1/1\n💲 Entry Price : 1900.0\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1890\n✔️ TP2 : 1880\n🚫 Stop Loss : 1910""",
+📊 #XAUUSD\n📉 Position: Sell\n❗️ R/R : 1.5/1\n💲 Entry Price : 1900.0\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1890\n✔️ TP2 : 1880\n🚫 Stop Loss : 1915""",
     ),
 ]
 
@@ -70,6 +70,13 @@ def test_parse_united_kings_noise(message):
 
 def test_parse_united_kings_tp_equal_entry():
     message = """#XAUUSD\nBuy gold\n@1900-1910\nTP1 : 1900\nTP2 : 1915\nSL : 1890\n"""
+    res, reason = parse_signal_united_kings(message, 1234)
+    assert res is None
+    assert reason == "invalid"
+
+
+def test_united_kings_sell_sl_inside_range_rejected():
+    message = """#XAUUSD\nSell\n@1900-1910\nTP1 : 1890\nSL : 1905\n"""
     res, reason = parse_signal_united_kings(message, 1234)
     assert res is None
     assert reason == "invalid"
