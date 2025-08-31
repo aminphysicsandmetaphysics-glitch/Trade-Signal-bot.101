@@ -730,7 +730,8 @@ def parse_signal(
         log.info("IGNORED (empty)")
         return None
     # Special-case: United Kings parser
-    if chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text):
+    is_united_kings = chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text)
+    if is_united_kings:
         try:
             res = parse_signal_united_kings(text, chat_id)
             if res is not None:
