@@ -11,10 +11,16 @@ def test_invalid_words_not_matched(text):
     "text,expected",
     [
         ("GOLD", "XAUUSD"),
-        ("BTCUSDT", "BTCUSDT"),
         ("#XAUUSD", "XAUUSD"),
         ("XAU USD", "XAUUSD"),
         ("XAU/USD", "XAUUSD"),
+        ("SILVER", "XAGUSD"),
+        ("NAS", "NAS100"),
+        ("NAS100", "NAS100"),
+        ("DJI", "US30"),
+        ("DAX", "GER40"),
+        ("ETH", "ETHUSDT"),
+        ("BTC/USDT", "BTCUSDT"),
     ],
 )
 def test_symbol_aliases(text, expected):

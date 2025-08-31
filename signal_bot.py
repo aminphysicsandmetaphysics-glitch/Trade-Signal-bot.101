@@ -55,7 +55,7 @@ from telethon.sessions import StringSession
 # pair of tokens separated by a space or slash. Delimiters are stripped
 # during normalisation. Newlines are not considered valid delimiters.
 PAIR_RE = re.compile(
-    r"(?:#)?([A-Z]{2,10}(?: */ *[A-Z]{2,10}| [A-Z]{2,10})?)\b"
+    r"(?:#)?([A-Z]{3,6}(?: */ *[A-Z]{3,6}| [A-Z]{3,6})?)(?=\b|\d)"
 )
 
 # Supported currency codes for validating symbol guesses
@@ -92,16 +92,53 @@ CURRENCY_CODES = {
 
 # Map common aliases and instrument names to canonical symbols
 ALIAS_MAP = {
+    # Commodities
     "GOLD": "XAUUSD",
     "SILVER": "XAGUSD",
     "WTI": "USOIL",
     "USOIL": "USOIL",
     "UKOIL": "UKOIL",
+    "BRENT": "UKOIL",
+    # Indices
+    "NAS": "NAS100",
+    "NAS100": "NAS100",
+    "US30": "US30",
+    "DJI": "US30",
+    "DAX": "GER40",
+    "GER40": "GER40",
+    # Major crypto tickers (USDT pairs)
     "BTC": "BTCUSDT",
+    "ETH": "ETHUSDT",
+    "BNB": "BNBUSDT",
+    "SOL": "SOLUSDT",
+    "XRP": "XRPUSDT",
+    "ADA": "ADAUSDT",
+    "DOGE": "DOGEUSDT",
+    "DOT": "DOTUSDT",
+    "LTC": "LTCUSDT",
+    "LINK": "LINKUSDT",
+    "BCH": "BCHUSDT",
+    "TRX": "TRXUSDT",
+    "XLM": "XLMUSDT",
+    "ETC": "ETCUSDT",
+    "XMR": "XMRUSDT",
+    "NEO": "NEOUSDT",
+    "EOS": "EOSUSDT",
+    "IOTA": "IOTAUSDT",
+    "XTZ": "XTZUSDT",
+    "UNI": "UNIUSDT",
+    "AVAX": "AVAXUSDT",
+    "MATIC": "MATICUSDT",
 }
 
+# Normalise symbol strings to canonical form
+def normalize_symbol(raw: str) -> str:
+    s = (raw or "").upper().lstrip("#").strip()
+    s = re.sub(r"[\s/]+", "", s)
+    return ALIAS_MAP.get(s, s)
+
 # Known non-FX instruments matched directly
-KNOWN_INSTRUMENTS = {"XAUUSD", "XAGUSD", "USOIL"}
+KNOWN_INSTRUMENTS = {"XAUUSD", "XAGUSD", "USOIL", "UKOIL", "NAS100", "US30", "GER40", "BTCUSDT"}
 # عدد
 NUM_RE = re.compile(r"(-?\d+(?:\.\d+)?)")
 # R/R
@@ -242,8 +279,7 @@ def guess_symbol(text: str) -> Optional[str]:
     m = PAIR_RE.search((text or "").upper())
     if not m:
         return None
-    sym = m.group(1).upper().replace(" ", "").replace("/", "")
-    sym = ALIAS_MAP.get(sym, sym)
+    sym = normalize_symbol(m.group(1))
     if sym in KNOWN_INSTRUMENTS or sym in ALIAS_MAP.values():
         return sym
     if len(sym) == 6:
@@ -659,7 +695,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
     if not lines:
         log.info("IGNORED (empty)")
         return None
-    symbol = "XAUUSD"
+    symbol = normalize_symbol("XAUUSD")
 
     position = ""
     if any(UK_BUY_RE.search(l) for l in lines):
@@ -753,7 +789,7 @@ def parse_channel_four(text: str, chat_id: int) -> Optional[str]:
         log.info("IGNORED (empty)")
         return None
 
-    symbol = guess_symbol(text) or ""
+    symbol = normalize_symbol(guess_symbol(text) or "")
     position = guess_position(text) or ""
     entry = extract_entry(lines) or ""
     sl = extract_sl(lines) or ""
@@ -834,7 +870,7 @@ def parse_signal(
             log.info("IGNORED (entry range not allowed)")
             return None
 
-    symbol = guess_symbol(text) or ""
+    symbol = normalize_symbol(guess_symbol(text) or "")
     position = guess_position(text) or ""
     entry = extract_entry(lines) or ""
     sl = extract_sl(lines) or ""
