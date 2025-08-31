@@ -1130,18 +1130,27 @@ def parse_signal(
     is_united_kings = chat_id in UNITED_KINGS_CHAT_IDS or _looks_like_united_kings(text)
     if is_united_kings:
         try:
-            res, reason = parse_signal_united_kings(text, chat_id)
+            res, reason = parse_signal_united_kings(
+                text, chat_id, return_meta=return_meta
+            )
             if res is not None:
+                if return_meta:
+                    formatted = to_unified(res, chat_id, res.get("extra", {}))
+                    return formatted, res
                 return res
             if reason in {"no entry range", "no position"}:
-                return parse_signal_classic(text, chat_id, profile=profile, return_meta=return_meta)
+                return parse_signal_classic(
+                    text, chat_id, profile=profile, return_meta=return_meta
+                )
             else:
                 if reason:
                     log.info(f"IGNORED ({reason})")
                 return None
         except Exception as e:
             log.debug(f"United Kings parser failed: {e}")
-            return parse_signal_classic(text, chat_id, profile=profile, return_meta=return_meta)
+            return parse_signal_classic(
+                text, chat_id, profile=profile, return_meta=return_meta
+            )
 
     return parse_signal_classic(text, chat_id, profile=profile, return_meta=return_meta)
 
