@@ -14,3 +14,8 @@ def test_extract_sl_entry_and_sl_same_line(lines, expected):
 def test_extract_sl_ignores_sl_without_number():
     lines = ["Buy 1.2345 SL", "TP1 1.2400"]
     assert extract_sl(lines) is None
+
+
+def test_extract_sl_allows_currency_symbol():
+    lines = ["Stop Loss : $3297"]
+    assert extract_sl(lines) == "3297"
