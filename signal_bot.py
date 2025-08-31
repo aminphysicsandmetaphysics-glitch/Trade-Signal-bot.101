@@ -758,24 +758,18 @@ def _validate_tp_sl(
             if entry_range and (any(lo <= tv <= hi for tv in tp_vals) or lo <= sl_v <= hi):
                 log.warning("TP/SL inside entry range")
         elif pos.startswith("SELL"):
-            boundary = hi if entry_range else e
-            if entry_range and lo <= sl_v <= hi:
-                log.info(
-                    f"IGNORED (sell but SL {sl} inside entry range {entry_range[0]}-{entry_range[1]})"
-                )
-                return False
+            boundary = lo if entry_range else e
             if sl_v <= boundary:
                 log.info(f"IGNORED (sell but SL {sl} <= entry {entry})")
                 return False
-            tp_boundary = lo if entry_range else e
-            if any(tv > tp_boundary for tv in tp_vals):
+            if any(tv > boundary for tv in tp_vals):
                 log.info(f"IGNORED (sell but TP {tp_vals[0]} > entry {entry})")
                 return False
-            if all(tv > tp_boundary for tv in tp_vals):
+            if all(tv > boundary for tv in tp_vals):
                 log.info(f"IGNORED (sell but all TP > entry {entry})")
                 return False
-            if entry_range and any(lo <= tv <= hi for tv in tp_vals):
-                log.warning("TP inside entry range")
+            if entry_range and (any(lo <= tv <= hi for tv in tp_vals) or lo <= sl_v <= hi):
+                log.warning("TP/SL inside entry range")
     except Exception:
         pass
     return True
