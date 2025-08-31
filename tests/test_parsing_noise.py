@@ -21,6 +21,19 @@ NOISY_CLEAN_PAIRS = [
 ]
 
 
+IGNORED_MESSAGES = [
+    """Make sure buy #EURUSD\nEntry 1.1000\nSL 1.0950\nTP1 1.1050""",
+    """All signals sell #GBPUSD\nEntry 1.3000\nSL 1.3050\nTP1 1.2950""",
+    """Add position #USDJPY\nBuy\nEntry 110\nSL 109\nTP1 111""",
+    """Upgrade your subscription buy #XAUUSD\nEntry 1900\nSL 1910\nTP1 1890""",
+]
+
+
 @pytest.mark.parametrize("noisy, clean", NOISY_CLEAN_PAIRS)
 def test_parse_signal_strips_noise_lines(noisy, clean):
     assert parse_signal(noisy, 1234, {}) == parse_signal(clean, 1234, {})
+
+
+@pytest.mark.parametrize("message", IGNORED_MESSAGES)
+def test_parse_signal_ignores_messages_with_noise_keywords(message):
+    assert parse_signal(message, 1234, {}) is None

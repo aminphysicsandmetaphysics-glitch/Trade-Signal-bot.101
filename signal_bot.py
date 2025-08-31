@@ -199,6 +199,9 @@ NON_SIGNAL_HINTS = [
     "change tp",
     "change sl",
     "change tp/sl",
+    "make sure",
+    "all signals",
+    "add position",
     "upgrade your subscription",
     # Persian noise/update hints
     "آپدیت",
