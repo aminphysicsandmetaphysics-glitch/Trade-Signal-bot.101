@@ -248,8 +248,11 @@ TP_VALUE_RE = re.compile(
 )
 
 # Direction synonyms used across parsers
-BUY_SYNONYMS = re.compile(r"\b(buy|long|purchase|grab)\b", re.IGNORECASE)
-SELL_SYNONYMS = re.compile(r"\b(sell|short|offload|unload|dump)\b", re.IGNORECASE)
+BUY_TERMS = ["buy", "buying", "long", "purchase", "grab"]
+SELL_TERMS = ["sell", "selling", "short", "offload", "unload", "dump", "ditch"]
+
+BUY_SYNONYMS = re.compile(rf"\b({'|'.join(BUY_TERMS)})\b", re.IGNORECASE)
+SELL_SYNONYMS = re.compile(rf"\b({'|'.join(SELL_TERMS)})\b", re.IGNORECASE)
 
 # Special-case parsing for the "United Kings" channels
 # (IDs taken from known public channels)
@@ -278,7 +281,7 @@ UK_NOISE_LINES = [
 UK_GOLD_RE = re.compile(r"\bgold\b", re.IGNORECASE)
 UK_PRICE_RE = re.compile(r"@\s*-?\d+(?:\.\d+)?")
 UK_ACTION_RE = re.compile(
-    r"(?:\b(?:buy|sell|grab|purchase|unload)\b|we(?:'|’)?re\s+(?:buying|selling))",
+    rf"\b({'|'.join(BUY_TERMS + SELL_TERMS)})\b",
     re.IGNORECASE,
 )
 
