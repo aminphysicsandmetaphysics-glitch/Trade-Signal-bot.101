@@ -77,6 +77,13 @@ def test_parse_united_kings_return_meta():
     assert meta["rr"] == "1/1.5"
 
 
+def test_parse_united_kings_sl_with_parentheses_and_decimal():
+    message = (
+        "#XAUUSD\nBuy gold\n@3460-3470\nTP1 : 3480\nTP2 : 3490\nStop Loss (SL) :3454.5\n"
+    )
+    assert parse_signal(message, 1234, {}) is not None
+
+
 @pytest.mark.parametrize("message", INVALID_SIGNALS)
 def test_parse_united_kings_invalid(message):
     assert parse_signal(message, 1234, {}) is None
