@@ -274,7 +274,13 @@ UNITED_KINGS_CHAT_IDS = {
 UK_RANGE_RE = re.compile(
     r"@?\s*(-?\d+(?:\.\d+)?)\s*[-\u2010-\u2015]\s*(-?\d+(?:\.\d+)?)"
 )
-UK_SL_RE = re.compile(r"\bS\s*L\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
+# SL lines may appear as plain "SL" or with optional "Stop Loss" text and
+# parentheses, e.g. "Stop Loss (SL)". The following regex captures the numeric
+# value while tolerating these variations.
+UK_SL_RE = re.compile(
+    r"\b(?:STOP\s*LOSS\s*)?\(?S\s*L\)?\s*[:@-]?\s*(-?\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
 UK_TP_RE = re.compile(r"\bT\s*P\s*\d*\s*[:@-]?\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
 UK_NOISE_LINES = [
     re.compile(r"united\s+kings", re.IGNORECASE),

@@ -20,6 +20,11 @@ VALID_SIGNALS = [
         """\
 📊 #XAUUSD\n📉 Position: Sell\n❗️ R/R : 1/1\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1890\n✔️ TP2 : 1880\n🚫 Stop Loss : 1910""",
     ),
+    (
+        """#XAUUSD\nBuy gold\n@1900-1910\nTP1 : 1915\nTP2 : 1920\nStop Loss (SL) : 1890\n""",
+        """\
+📊 #XAUUSD\n📉 Position: Buy\n❗️ R/R : 1/1.5\n🎯 Entry Range : 1900 – 1910\n✔️ TP1 : 1915\n✔️ TP2 : 1920\n🚫 Stop Loss : 1890""",
+    ),
 ]
 
 INVALID_SIGNALS = [
