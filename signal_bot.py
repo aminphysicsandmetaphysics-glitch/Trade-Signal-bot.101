@@ -596,7 +596,7 @@ def parse_signal_united_kings(text: str, chat_id: int) -> Optional[str]:
 
     range_str = m.group(0)
     if "@" in range_str:
-        entry = _fmt(lo)
+        entry = f"{lo}"
     else:
         mid = (lo + hi) / 2
         entry = _fmt(mid)
