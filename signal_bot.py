@@ -134,6 +134,7 @@ def normalize_numbers(text: str) -> str:
     # Normalize decimal and thousands separators
     trans[ord("٫")] = "."  # Arabic decimal separator
     trans[ord("٬")] = ""  # Arabic thousands separator (remove)
+    trans[ord(",")] = ""  # Comma thousands separator (remove)
 
     return text.translate(trans)
 
