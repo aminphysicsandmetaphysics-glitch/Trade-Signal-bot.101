@@ -5,6 +5,8 @@ import importlib
 
 def test_stop_bot_route_disconnects_cleanly(monkeypatch):
     monkeypatch.setenv("SESSION_SECRET", "test")
+    monkeypatch.setenv("ADMIN_USER", "u")
+    monkeypatch.setenv("ADMIN_PASS", "p")
     app = importlib.import_module("app")
 
     loop = asyncio.new_event_loop()
@@ -38,6 +40,7 @@ def test_stop_bot_route_disconnects_cleanly(monkeypatch):
     monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", fake_run_coroutine_threadsafe)
 
     client = app.app.test_client()
+    client.post("/login", data={"username": "u", "password": "p"})
     resp = client.post("/stop_bot")
     assert resp.status_code == 302
     assert fake_bot.stopped
