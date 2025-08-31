@@ -26,6 +26,8 @@
     </div>
     <label>کانال‌های منبع (JSON یا لیست با کاما)</label>
     <textarea name="from_channels" placeholder='[1467736193, 2123816390, 1286609636]'>{{ (cfg.from_channels if cfg else '') or '[1467736193, 2123816390, 1286609636]' }}</textarea>
+    <label>شناسه کانال‌هایی که R/R نمایش داده نشود</label>
+    <input name="skip_rr_channels" placeholder="123456789, -100987654321" value="{{ (cfg.skip_rr_channels if cfg else '') or '' }}">
     <div class="btns">
       <button class="primary" type="submit">ذخیره</button>
     </div>
