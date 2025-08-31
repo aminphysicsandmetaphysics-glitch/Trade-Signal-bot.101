@@ -34,8 +34,7 @@ from datetime import datetime, timezone, timedelta
 from collections import deque
 from typing import List, Dict, Optional, Iterable, Callable, Union, Deque, Tuple, Any
 
-from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
-from markupsafe import escape
+from jinja2 import Environment, FileSystemLoader, Template
 
 from telethon import TelegramClient, events
 from telethon.errors import (
@@ -303,10 +302,7 @@ def to_unified(signal: Dict, chat_id: int, extra: Optional[Dict] = None) -> str:
     return "\n".join(parts)
 
 
-_jinja_env = Environment(
-    loader=FileSystemLoader(os.getenv("TEMPLATE_DIR", "templates")),
-    autoescape=select_autoescape(["html", "xml"], default_for_string=True),
-)
+_jinja_env = Environment(loader=FileSystemLoader(os.getenv("TEMPLATE_DIR", "templates")), autoescape=False)
 
 
 def render_template(template: str, context: Dict[str, Any]) -> str:
@@ -318,13 +314,10 @@ def render_template(template: str, context: Dict[str, Any]) -> str:
     template.
     """
 
-    if template.endswith(('.j2', '.jinja2', '.html')) and os.path.exists(
-        os.path.join(os.getenv("TEMPLATE_DIR", "templates"), template)
-    ):
+    if template.endswith(('.j2', '.jinja2', '.html')) and os.path.exists(os.path.join(os.getenv("TEMPLATE_DIR", "templates"), template)):
         tmpl = _jinja_env.get_template(template)
     else:
-        template = escape(template)
-        tmpl = _jinja_env.from_string(str(template))
+        tmpl = _jinja_env.from_string(template)
     return tmpl.render(**context)
 
 
