@@ -32,7 +32,9 @@ import hashlib
 import time
 from datetime import datetime, timezone, timedelta
 from collections import deque
-from typing import List, Dict, Optional, Iterable, Callable, Union, Deque, Tuple
+from typing import List, Dict, Optional, Iterable, Callable, Union, Deque, Tuple, Any
+
+from jinja2 import Environment, FileSystemLoader, Template
 
 from telethon import TelegramClient, events
 from telethon.errors import (
@@ -279,6 +281,25 @@ def to_unified(signal: Dict, chat_id: int, extra: Optional[Dict] = None) -> str:
         parts.append(f"✔️ TP{i} : {tp}")
     parts.append(f"🚫 Stop Loss : {signal['sl']}")
     return "\n".join(parts)
+
+
+_jinja_env = Environment(loader=FileSystemLoader(os.getenv("TEMPLATE_DIR", "templates")), autoescape=False)
+
+
+def render_template(template: str, context: Dict[str, Any]) -> str:
+    """Render a Jinja2 *template* using *context*.
+
+    The *template* parameter may be the name of a template file located in the
+    directory specified by ``TEMPLATE_DIR`` (default ``templates``) or a raw
+    template string.  ``context`` provides the variables available to the
+    template.
+    """
+
+    if template.endswith(('.j2', '.jinja2', '.html')) and os.path.exists(os.path.join(os.getenv("TEMPLATE_DIR", "templates"), template)):
+        tmpl = _jinja_env.get_template(template)
+    else:
+        tmpl = _jinja_env.from_string(template)
+    return tmpl.render(**context)
 
 
 def _clean_uk_lines(text: str) -> List[str]:
@@ -607,6 +628,8 @@ class SignalBot:
         to_channels: Iterable[Union[int, str]],
         retry_delay: int = 5,
         max_retries: int | None = None,
+        profiles: Optional[Dict[str, Dict[Union[int, str], Dict[str, Any]]]] = None,
+        active_profile: str = "default",
     ):
         self.api_id = api_id
         self.api_hash = api_hash
@@ -627,6 +650,24 @@ class SignalBot:
             c = _coerce_channel_id(c)
             norm_to.append(c)
         self.to_channels = norm_to
+
+        # Profile mapping (source -> {dests, template})
+        self.profiles: Dict[str, Dict[Union[int, str], Dict[str, Any]]] = {}
+        if profiles:
+            for name, mapping in profiles.items():
+                norm_map: Dict[Union[int, str], Dict[str, Any]] = {}
+                for src, cfg in (mapping or {}).items():
+                    src_norm = _coerce_channel_id(_norm_chat_identifier(src))
+                    dests = cfg.get("dests") or []
+                    if isinstance(dests, (str, int)):
+                        dests = [dests]
+                    norm_dests: List[Union[int, str]] = []
+                    for d in dests:
+                        d = _coerce_channel_id(_norm_chat_identifier(d))
+                        norm_dests.append(d)
+                    norm_map[src_norm] = {"dests": norm_dests, "template": cfg.get("template")}
+                self.profiles[name] = norm_map
+        self.active_profile = active_profile
 
         self.client: Optional[TelegramClient] = None
         self._running = False
@@ -650,6 +691,17 @@ class SignalBot:
     # Callback
     def set_on_signal(self, callback: Optional[Callable[[dict], None]]):
         self._callback = callback
+
+    # Resolve source mapping
+    def resolve_targets(self, src_id: Union[int, str]) -> Tuple[List[Union[int, str]], Optional[str]]:
+        src_norm = _coerce_channel_id(_norm_chat_identifier(src_id))
+        prof = self.profiles.get(self.active_profile, {})
+        cfg = prof.get(src_norm)
+        if cfg:
+            dests = cfg.get("dests") or self.to_channels
+            template = cfg.get("template")
+            return dests, template
+        return self.to_channels, None
 
     # State
     def is_running(self) -> bool:
@@ -755,7 +807,14 @@ class SignalBot:
                     if not formatted:
                         return
 
-                    for dest in self.to_channels:
+                    dests, template = self.resolve_targets(event.chat_id)
+                    if template:
+                        try:
+                            formatted = render_template(template, {"message": formatted})
+                        except Exception as tmpl_err:
+                            log.error(f"Template render failed for {template}: {tmpl_err}")
+
+                    for dest in dests:
                         try:
                             await self.client.send_message(dest, formatted)
                             log.info(f"SENT to {dest}")
@@ -802,7 +861,12 @@ class SignalBot:
                             )
                         except Exception as e:
                             log.error(f"Cannot access source '{c}': {e}")
-                    for dest in self.to_channels:
+                    dests_to_check = set(self.to_channels)
+                    prof = self.profiles.get(self.active_profile, {})
+                    for cfg in prof.values():
+                        for d in cfg.get("dests", []):
+                            dests_to_check.add(d)
+                    for dest in dests_to_check:
                         try:
                             ent = await self.client.get_entity(dest)
                             title = getattr(ent, "title", str(ent))

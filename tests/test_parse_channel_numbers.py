@@ -5,6 +5,8 @@ import pytest
 @pytest.fixture
 def app_module(monkeypatch):
     monkeypatch.setenv("SESSION_SECRET", "test")
+    monkeypatch.setenv("ADMIN_USER", "u")
+    monkeypatch.setenv("ADMIN_PASS", "p")
     return importlib.reload(importlib.import_module("app"))
 
 
