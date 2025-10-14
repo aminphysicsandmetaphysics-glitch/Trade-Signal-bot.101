@@ -15,17 +15,7 @@ import asyncio
 from threading import Thread
 from functools import wraps
 
-from flask import (
-    Flask,
-    flash,
-    jsonify,
-    redirect,
-    render_template,
-    request,
-    session,
-    url_for,
-    current_app,
-)
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 import secrets
 from itsdangerous import BadSignature, URLSafeTimedSerializer
@@ -44,9 +34,6 @@ secret = os.environ.get("SESSION_SECRET")
 if not secret:
     raise RuntimeError("SESSION_SECRET environment variable must be set")
 app.secret_key = secret
-
-admin_user = os.environ.get("ADMIN_USER", "admin")
-admin_pass = os.environ.get("ADMIN_PASS", "admin")
 
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
@@ -200,17 +187,7 @@ def parse_to_channels(raw: str | None) -> list:
 def login_required(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        disabled = {
-            e.strip()
-            for e in os.environ.get("DISABLE_AUTH", "").split(",")
-            if e.strip()
-        }
-        if (
-            not session.get("logged_in")
-            and not current_app.config.get("TESTING")
-            and request.endpoint not in disabled
-        ):
-            return redirect(url_for("login"))
+        """Authentication is disabled; simply invoke the view."""
         return func(*args, **kwargs)
 
     return wrapper
@@ -218,15 +195,8 @@ def login_required(func):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if request.method == "POST":
-        username = request.form.get("username", "")
-        password = request.form.get("password", "")
-        if username == admin_user and password == admin_pass:
-            session["logged_in"] = True
-            flash("Logged in.", "success")
-            return redirect(url_for("index"))
-        flash("Invalid credentials.", "error")
-    return render_template("login.html")
+    flash("ورود لازم نیست؛ مستقیماً از داشبورد استفاده کنید.", "info")
+    return redirect(url_for("index"))
 
 
 # ----------------------------------------------------------------------------

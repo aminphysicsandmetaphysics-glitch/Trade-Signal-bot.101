@@ -75,18 +75,17 @@ destination channel lists. When a parsed signal matches one of these keys, the
 bot sends the message to the specified channels instead of the default
 ``destinations``.
 
-## Authentication
+## Dashboard Access
 
-The dashboard is protected by a simple login. Before running the app set
-the following environment variables:
+The management panel is now open by default—هیچ نام کاربری یا رمزی لازم
+نیست. تنها کافی است متغیر محیطی زیر را تنظیم کنید تا سیستم CSRF فعال بماند:
 
 * `SESSION_SECRET` – random string used to sign the Flask session.
-* `ADMIN_USER` – username for logging in.
-* `ADMIN_PASS` – password for logging in.
 * `PROFILE_STORE_PATH` – optional path for storing profile data (defaults to `profiles.json`).
 
-Visit `/login` and enter the credentials to access protected routes like
-`/`, `/save_config`, `/start_bot` and `/stop_bot`.
+پس از اجرای برنامه، مستقیماً به `/` بروید و تنظیمات را ذخیره کنید. برای ایمنی
+عمومی بهتر است سرویس را پشت یک فایروال یا VPN قرار دهید تا فقط خودتان به
+پنل دسترسی داشته باشید.
 
 ## Deploying to Render
 
@@ -105,8 +104,6 @@ Visit `/login` and enter the credentials to access protected routes like
    * `DESTS` – a JSON array of destination channel usernames or numeric IDs.
    * `SESSION_STRING` – the session string generated earlier.
    * `SESSION_SECRET` – random string for Flask session security.
-   * `ADMIN_USER` – username for the web dashboard.
-   * `ADMIN_PASS` – password for the web dashboard.
    * `PROFILE_STORE_PATH` – optional path for storing profile data (defaults to `profiles.json`).
 
 5. Deploy the service.  Once running, visit `/` to configure the bot if you have not set environment variables.  The dashboard allows you to start and stop the bot without redeploying.
@@ -116,3 +113,4 @@ Visit `/login` and enter the credentials to access protected routes like
 * Channel identifiers prefixed with `@` are resolved automatically.  Numeric channel IDs (e.g. 1467736193) are coerced to the proper negative format (`-1001467736193`) for Telegram API compatibility.
 * If a source channel has forwarding restrictions enabled, the bot will attempt to copy the content instead of forwarding.  This fallback works for both text messages and media messages.
 * R/R is computed automatically from entry, stop loss and the first take profit if not explicitly provided in the message.
+* برای پایش و عیب‌یابی قطعی‌های احتمالی، به [راهنمای پایداری](docs/uptime.md) مراجعه کنید. این راهنما توضیح می‌دهد چرا ربات ممکن است غیر فعال شود و چگونه آن را روی سرور ابری ۲۴/۷ فعال نگه دارید.

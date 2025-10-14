@@ -3,14 +3,11 @@ services:
     name: Trade-Signal-bot-101
     env: python
     plan: free
+    healthCheckPath: /health
     buildCommand: "pip install -r requirements.txt"
     startCommand: gunicorn --capture-output --log-level info --error-logfile - --access-logfile - -c gunicorn.conf.py wsgi:app
     envVars:
       - key: PORT
         value: "5000"
       - key: SESSION_SECRET
-        sync: false
-      - key: ADMIN_USER
-        sync: false
-      - key: ADMIN_PASS
         sync: false
