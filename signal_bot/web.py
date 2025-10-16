@@ -8,6 +8,7 @@ from .state import (
     events,
     bot_state,
     add_event,
+    get_health_snapshot,
 )
 
 def setup_routes(app):
@@ -29,6 +30,10 @@ def setup_routes(app):
             "by_market": by_market,
             "running": bot_state.get("running", False),
         })
+
+    @app.get("/api/health")
+    def api_health():
+        return jsonify(get_health_snapshot())
 
     @app.get("/api/logs")
     def api_logs():
