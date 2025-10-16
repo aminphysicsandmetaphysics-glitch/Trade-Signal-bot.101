@@ -227,6 +227,9 @@ def parse_signal_generic(message_text: str):
         if re.search(r"GOLD", clean_text(text), flags=re.I):
             symbol = "XAUUSD"
 
+    if not symbol:
+        return None
+
     if not (entry and targets and stop):
         # At minimum we expect entry, stop, and at least one target for a valid signal.
         return None
