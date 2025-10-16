@@ -2,6 +2,7 @@ import re
 from ..utils.normalize import fa_to_en, ensure_usdt
 from ..utils.rr import format_rr
 from ..utils.numbers import extract_numbers
+from ..utils.validation import has_valid_name, validate_price_structure
 
 UPDATE_PATTERNS = [
     r"تارگت\s+(اول|دوم|سوم|چهارم|پنجم)|فول\s*تارگت",
@@ -89,8 +90,11 @@ def parse_signal_2xclub(message_text: str):
         nums = extract_numbers(sm.group(1))
         stop = nums[0] if nums else None
 
+    if not (has_valid_name(symbol) and validate_price_structure(entry, targets, stop, side)):
+        return None
+
     rr = None
-    if entry and stop and targets:
+    if entry is not None and stop is not None and targets:
         rr = format_rr(entry, stop, targets[0], side)
 
     return {
