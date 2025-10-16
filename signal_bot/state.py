@@ -22,4 +22,15 @@ def add_event(message: str, level: str = "info"):
     })
 
 
+def add_log_entry(*, symbol: str | None, market: str | None, side: str | None, rr: str | None, sent: bool):
+    logs.appendleft({
+        "ts": _now_str(),
+        "symbol": symbol,
+        "market": market,
+        "side": side,
+        "rr": rr,
+        "sent": sent,
+    })
+
+
 add_event("🟢 راه‌اندازی اولیه سرویس ثبت شد.", "success")
