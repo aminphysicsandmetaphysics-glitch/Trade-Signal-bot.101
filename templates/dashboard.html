@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Signal Bot — Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-950 text-gray-100">
+  <div class="max-w-6xl mx-auto p-6">
+    <header class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold">داشبورد ربات سیگنال</h1>
+      <div class="space-x-2 space-x-reverse">
+        <button id="btn-start" class="px-4 py-2 bg-emerald-600 rounded-lg hover:bg-emerald-500">Start</button>
+        <button id="btn-stop" class="px-4 py-2 bg-rose-600 rounded-lg hover:bg-rose-500">Stop</button>
+      </div>
+    </header>
+
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div class="bg-gray-900 rounded-xl p-4"><div class="text-gray-400 text-sm">Received</div><div id="c-received" class="text-2xl font-semibold">0</div></div>
+      <div class="bg-gray-900 rounded-xl p-4"><div class="text-gray-400 text-sm">Parsed</div><div id="c-parsed" class="text-2xl font-semibold">0</div></div>
+      <div class="bg-gray-900 rounded-xl p-4"><div class="text-gray-400 text-sm">Sent</div><div id="c-sent" class="text-2xl font-semibold">0</div></div>
+      <div class="bg-gray-900 rounded-xl p-4">
+        <div class="text-gray-400 text-sm">Rejected/Updates</div>
+        <div><span id="c-rejected" class="text-xl font-semibold">0</span> / <span id="c-updates" class="text-xl font-semibold">0</span></div>
+      </div>
+    </section>
+
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+      <div class="bg-gray-900 rounded-xl p-4 md:col-span-1">
+        <h2 class="font-semibold mb-2">تفکیک بازار</h2>
+        <canvas id="pie-market" height="220"></canvas>
+      </div>
+      <div class="bg-gray-900 rounded-xl p-4 md:col-span-2">
+        <h2 class="font-semibold mb-2">آخرین سیگنال‌ها</h2>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="text-gray-300">
+              <tr>
+                <th class="text-right p-2">زمان</th>
+                <th class="text-right p-2">نماد</th>
+                <th class="text-right p-2">بازار</th>
+                <th class="text-right p-2">جهت</th>
+                <th class="text-right p-2">R/R</th>
+                <th class="text-right p-2">وضعیت</th>
+              </tr>
+            </thead>
+            <tbody id="logs" class="divide-y divide-gray-800"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+  let pie;
+  async function fetchStatus() {
+    const r = await fetch('/api/status'); const s = await r.json();
+    document.getElementById('c-received').innerText = s.received ?? 0;
+    document.getElementById('c-parsed').innerText = s.parsed ?? 0;
+    document.getElementById('c-sent').innerText = s.sent ?? 0;
+    document.getElementById('c-rejected').innerText = s.rejected ?? 0;
+    document.getElementById('c-updates').innerText = s.updates ?? 0;
+    const crypto = s.by_market?.crypto ?? 0;
+    const forex  = s.by_market?.forex ?? 0;
+    const gold   = s.by_market?.gold ?? 0;
+    const data = { labels: ['Crypto','Forex','Gold'], datasets: [{ data: [crypto, forex, gold] }]};
+    if (!pie) { pie = new Chart(document.getElementById('pie-market'), { type: 'pie', data }); }
+    else { pie.data = data; pie.update(); }
+  }
+  async function fetchLogs() {
+    const r = await fetch('/api/logs'); const items = await r.json();
+    const tbody = document.getElementById('logs'); tbody.innerHTML = '';
+    for (const it of items) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="p-2 whitespace-nowrap">${it.ts || '-'}</td>
+        <td class="p-2">#${it.symbol || '-'}</td>
+        <td class="p-2">${it.market || '-'}</td>
+        <td class="p-2">${(it.side || '').toUpperCase()}</td>
+        <td class="p-2">${it.rr || '-'}</td>
+        <td class="p-2">${it.sent ? '✅' : '—'}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+  document.getElementById('btn-start').onclick = async () => { await fetch('/api/bot/start', {method:'POST'}); await fetchStatus(); };
+  document.getElementById('btn-stop').onclick  = async () => { await fetch('/api/bot/stop',  {method:'POST'}); await fetchStatus(); };
+  async function tick(){ await fetchStatus(); await fetchLogs(); }
+  tick(); setInterval(tick, 5000);
+  </script>
+</body>
+</html>
