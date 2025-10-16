@@ -9,13 +9,21 @@
 </head>
 <body class="bg-gray-950 text-gray-100">
   <div class="max-w-6xl mx-auto p-6">
-    <header class="flex items-center justify-between mb-6">
+    <header class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
       <h1 class="text-2xl font-bold">داشبورد ربات سیگنال</h1>
-      <div class="space-x-2 space-x-reverse">
-        <button id="btn-start" class="px-4 py-2 bg-emerald-600 rounded-lg hover:bg-emerald-500">Start</button>
-        <button id="btn-stop" class="px-4 py-2 bg-rose-600 rounded-lg hover:bg-rose-500">Stop</button>
+      <div class="flex flex-col gap-2 md:items-end">
+        <div class="flex items-center gap-2 justify-end">
+          <span class="text-sm text-gray-400">وضعیت ربات:</span>
+          <span id="bot-status" class="px-3 py-1 text-xs font-semibold rounded-full bg-emerald-600/40 text-emerald-100 border border-emerald-500/50">فعال</span>
+        </div>
+        <div class="flex gap-2 justify-end">
+          <button id="btn-start" class="px-4 py-2 bg-emerald-600 rounded-lg hover:bg-emerald-500">Start</button>
+          <button id="btn-stop" class="px-4 py-2 bg-rose-600 rounded-lg hover:bg-rose-500">Stop</button>
+        </div>
       </div>
     </header>
+
+    <div id="action-message" class="hidden mb-6 px-4 py-3 text-sm rounded-lg border bg-gray-900"></div>
 
     <section class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
       <div class="bg-gray-900 rounded-xl p-4"><div class="text-gray-400 text-sm">Received</div><div id="c-received" class="text-2xl font-semibold">0</div></div>
@@ -51,10 +59,65 @@
         </div>
       </div>
     </section>
+
+    <section class="bg-gray-900 rounded-xl p-4 mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">وقایع و پیام‌ها</h2>
+        <span class="text-xs text-gray-500">آخرین رخدادها</span>
+      </div>
+      <ul id="event-log-list" class="space-y-2 max-h-60 overflow-y-auto text-sm"></ul>
+      <template id="event-log-empty">
+        <li class="text-gray-500 text-sm">هنوز رویدادی ثبت نشده است.</li>
+      </template>
+    </section>
+
+    <section class="bg-gray-900 rounded-xl p-4 mb-8">
+      <h2 class="font-semibold mb-2">🧪 تست سیگنال</h2>
+      <textarea id="test-input" class="w-full h-40 p-3 bg-gray-800 text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600/60" placeholder="پیام سیگنال را اینجا وارد کنید..."></textarea>
+      <div class="flex gap-2 mt-3">
+        <button id="btn-test" class="px-4 py-2 bg-emerald-600 rounded-lg hover:bg-emerald-500">تست</button>
+        <button id="btn-clear" class="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500">پاک‌سازی</button>
+      </div>
+      <div id="test-result" class="mt-4 bg-gray-800/70 p-3 rounded-lg text-sm text-gray-100 border border-gray-700 min-h-[3rem]"></div>
+    </section>
   </div>
 
   <script>
   let pie;
+  let messageTimer;
+  const statusEl = document.getElementById('bot-status');
+  const actionMessage = document.getElementById('action-message');
+
+  function updateStatus(running) {
+    if (!statusEl) return;
+    const base = 'px-3 py-1 text-xs font-semibold rounded-full border';
+    if (running) {
+      statusEl.className = `${base} bg-emerald-600/40 text-emerald-100 border-emerald-500/50`;
+      statusEl.innerText = 'فعال';
+    } else {
+      statusEl.className = `${base} bg-rose-600/30 text-rose-100 border-rose-500/40`;
+      statusEl.innerText = 'متوقف';
+    }
+  }
+
+  function showMessage(text, tone = 'info') {
+    if (!actionMessage) return;
+    const base = 'mb-6 px-4 py-3 text-sm rounded-lg border transition';
+    const tones = {
+      success: 'bg-emerald-900/40 border-emerald-600/60 text-emerald-100',
+      warning: 'bg-amber-900/30 border-amber-600/60 text-amber-100',
+      error: 'bg-rose-900/30 border-rose-600/60 text-rose-100',
+      info: 'bg-sky-900/30 border-sky-600/60 text-sky-100',
+    };
+    actionMessage.className = `${base} ${tones[tone] || tones.info}`;
+    actionMessage.innerText = text;
+    actionMessage.classList.remove('hidden');
+    if (messageTimer) clearTimeout(messageTimer);
+    messageTimer = setTimeout(() => {
+      actionMessage.classList.add('hidden');
+    }, 5000);
+  }
+
   async function fetchStatus() {
     const r = await fetch('/api/status'); const s = await r.json();
     document.getElementById('c-received').innerText = s.received ?? 0;
@@ -62,6 +125,7 @@
     document.getElementById('c-sent').innerText = s.sent ?? 0;
     document.getElementById('c-rejected').innerText = s.rejected ?? 0;
     document.getElementById('c-updates').innerText = s.updates ?? 0;
+    updateStatus(Boolean(s.running));
     const crypto = s.by_market?.crypto ?? 0;
     const forex  = s.by_market?.forex ?? 0;
     const gold   = s.by_market?.gold ?? 0;
@@ -85,9 +149,99 @@
       tbody.appendChild(tr);
     }
   }
-  document.getElementById('btn-start').onclick = async () => { await fetch('/api/bot/start', {method:'POST'}); await fetchStatus(); };
-  document.getElementById('btn-stop').onclick  = async () => { await fetch('/api/bot/stop',  {method:'POST'}); await fetchStatus(); };
-  async function tick(){ await fetchStatus(); await fetchLogs(); }
+  function levelBadge(level) {
+    switch (level) {
+      case 'success':
+        return { cls: 'bg-emerald-600/60 text-emerald-100', text: 'موفق' };
+      case 'warning':
+        return { cls: 'bg-amber-500/60 text-amber-950', text: 'هشدار' };
+      case 'error':
+        return { cls: 'bg-rose-600/60 text-rose-50', text: 'خطا' };
+      default:
+        return { cls: 'bg-sky-600/60 text-sky-100', text: 'اطلاع' };
+    }
+  }
+  async function fetchEvents() {
+    const list = document.getElementById('event-log-list');
+    if (!list) return;
+    const r = await fetch('/api/events');
+    const items = await r.json();
+    list.innerHTML = '';
+    if (!items.length) {
+      list.innerHTML = '<li class="text-gray-500 text-sm">هنوز رویدادی ثبت نشده است.</li>';
+      return;
+    }
+    for (const ev of items) {
+      const badge = levelBadge(ev.level);
+      const li = document.createElement('li');
+      li.className = 'flex items-start gap-3 bg-gray-950/40 border border-gray-800 rounded-lg p-3';
+      li.innerHTML = `
+        <span class="text-xs font-mono text-gray-500 mt-0.5">${ev.ts || '-'}</span>
+        <div class="flex-1">
+          <div class="text-sm leading-relaxed">${ev.message || '-'}</div>
+          <span class="inline-block mt-2 px-2 py-0.5 text-[11px] rounded-full ${badge.cls}">${badge.text}</span>
+        </div>
+      `;
+      list.appendChild(li);
+    }
+  }
+
+  document.getElementById('btn-start').onclick = async () => {
+    try {
+      const r = await fetch('/api/bot/start', { method: 'POST' });
+      const data = await r.json();
+      updateStatus(Boolean(data.running));
+      showMessage(data.message || 'عملیات انجام شد.', data.running ? 'success' : 'info');
+      await fetchEvents();
+      await fetchStatus();
+    } catch (err) {
+      showMessage('خطا در ارتباط با سرور.', 'error');
+    }
+  };
+  document.getElementById('btn-stop').onclick  = async () => {
+    try {
+      const r = await fetch('/api/bot/stop',  { method: 'POST' });
+      const data = await r.json();
+      updateStatus(Boolean(data.running));
+      showMessage(data.message || 'عملیات انجام شد.', data.running ? 'info' : 'warning');
+      await fetchEvents();
+      await fetchStatus();
+    } catch (err) {
+      showMessage('خطا در ارتباط با سرور.', 'error');
+    }
+  };
+
+  document.getElementById('btn-test').onclick = async () => {
+    const text = document.getElementById('test-input').value.trim();
+    const result = document.getElementById('test-result');
+    if (!text) {
+      result.innerText = 'پیامی برای تست وارد نشده است.';
+      return;
+    }
+    result.innerText = 'در حال پردازش...';
+    try {
+      const r = await fetch('/api/test-signal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text })
+      });
+      const data = await r.json();
+      if (!data.ok) {
+        result.innerText = `❌ ${data.error || 'خطای نامشخص.'}`;
+        return;
+      }
+      const parsed = JSON.stringify(data.parsed, null, 2);
+      result.innerText = `✅ موفق\n\n— داده پارس شده:\n${parsed}\n\n— پیام قالب‌بندی شده:\n${data.formatted}`;
+    } catch (error) {
+      result.innerText = '❌ خطا در ارتباط با سرور.';
+    }
+  };
+  document.getElementById('btn-clear').onclick = () => {
+    document.getElementById('test-input').value = '';
+    document.getElementById('test-result').innerText = '';
+  };
+
+  async function tick(){ await fetchStatus(); await fetchLogs(); await fetchEvents(); }
   tick(); setInterval(tick, 5000);
   </script>
 </body>
