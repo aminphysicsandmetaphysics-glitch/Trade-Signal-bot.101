@@ -44,3 +44,10 @@ def test_gold_exclusive_update_is_detected():
     parsed = parse_signal_generic(msg)
     assert parsed is not None
     assert parsed["is_update"] is True
+
+
+def test_signal_without_symbol_is_rejected():
+    msg = """VIP Signals\nBuy @ 4030-4028\nTP: 4045\nSL: 4015\n"""
+
+    parsed = parse_signal_generic(msg)
+    assert parsed is None
