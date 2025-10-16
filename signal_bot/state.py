@@ -69,8 +69,36 @@ def _connection() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def _execute(conn: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
-    return conn.execute(sql, params)
+def _execute(
+    conn: sqlite3.Connection,
+    sql: str,
+    params: tuple[Any, ...] = (),
+    *,
+    retries: int = 5,
+    base_delay: float = 0.1,
+) -> sqlite3.Cursor:
+    """Execute ``sql`` with ``params`` on ``conn`` handling transient locks.
+
+    Render runs the web dashboard and the Telegram worker in separate
+    processes.  Under load they sometimes attempt to write to the SQLite
+    database at the same time which can trigger ``sqlite3.OperationalError``
+    with the ``database is locked`` message.  SQLite usually resolves this via
+    the ``busy_timeout`` configured in :func:`_connection`, but on networked
+    filesystems the lock may take slightly longer to clear which results in the
+    exception bubbling up to the caller.  Retrying the statement with a brief
+    exponential backoff keeps the API responsive without sacrificing data
+    integrity.
+    """
+
+    attempt = 0
+    while True:
+        try:
+            return conn.execute(sql, params)
+        except sqlite3.OperationalError as exc:
+            if "database is locked" not in str(exc).lower() or attempt >= retries:
+                raise
+            time.sleep(base_delay * (2**attempt))
+            attempt += 1
 
 
 def _ensure_initialised() -> None:
