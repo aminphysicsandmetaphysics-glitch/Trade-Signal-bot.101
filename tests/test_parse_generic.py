@@ -65,3 +65,17 @@ def test_reject_short_with_higher_targets():
 
     parsed = parse_signal_generic(msg)
     assert parsed is None
+
+
+def test_reject_long_range_with_low_target():
+    msg = """United Kings VIP\nWe're buying Gold @4039-4034\nSL: 4032\nTP1: 4035\n"""
+
+    parsed = parse_signal_generic(msg)
+    assert parsed is None
+
+
+def test_reject_short_range_with_low_stop():
+    msg = """United Kings VIP\nSell Gold @4046-4051\nSL: 4049\nTP1: 4030\n"""
+
+    parsed = parse_signal_generic(msg)
+    assert parsed is None

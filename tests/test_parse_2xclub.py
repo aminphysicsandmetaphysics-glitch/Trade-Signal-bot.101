@@ -51,3 +51,16 @@ def test_reject_inconsistent_short_signal():
 
     parsed = parse_signal_2xclub(msg)
     assert parsed is None
+
+
+def test_reject_long_range_where_stop_or_target_fail():
+    msg = """📈رمزارز  TEST
+در نقاط 10 و 12 پوزیشن لانگ باز کنید.
+🎯تارگت:
+12.5 - 13.5
+❌استاپ:
+11.5
+"""
+
+    parsed = parse_signal_2xclub(msg)
+    assert parsed is None
