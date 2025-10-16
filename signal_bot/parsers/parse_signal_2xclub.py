@@ -90,7 +90,16 @@ def parse_signal_2xclub(message_text: str):
         nums = extract_numbers(sm.group(1))
         stop = nums[0] if nums else None
 
-    if not (has_valid_name(symbol) and validate_price_structure(entry, targets, stop, side)):
+    if not (
+        has_valid_name(symbol)
+        and validate_price_structure(
+            entry,
+            targets,
+            stop,
+            side,
+            entry_candidates=entries,
+        )
+    ):
         return None
 
     rr = None

@@ -238,7 +238,13 @@ def parse_signal_generic(message_text: str):
         # At minimum we expect entry, stop, and at least one target for a valid signal.
         return None
 
-    if not validate_price_structure(entry, targets, stop, side):
+    if not validate_price_structure(
+        entry,
+        targets,
+        stop,
+        side,
+        entry_candidates=entries,
+    ):
         return None
 
     market_type = "Crypto" if is_crypto(symbol, text) else "Forex"
