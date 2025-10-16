@@ -5,7 +5,13 @@ from .parsers.parse_signal_2xclub import parse_signal_2xclub
 from .parsers.parse_signal_generic import parse_signal_generic
 from .utils.normalize import is_crypto, ensure_usdt
 from .utils.rr import format_rr
-from .state import add_event, add_log_entry, bot_state
+from .state import (
+    add_event,
+    add_log_entry,
+    increment_counter,
+    increment_market_counter,
+    is_bot_running,
+)
 
 logger = logging.getLogger("signal-bot.service")
 
@@ -71,38 +77,33 @@ def try_parsers(message_text: str) -> dict | None:
             return parsed
     return None
 
-async def handle_incoming_message(client, event_text: str, counters=None, logs=None, by_market=None):
-    if counters is not None:
-        counters["received"] = counters.get("received", 0) + 1
+async def handle_incoming_message(client, event_text: str) -> None:
+    increment_counter("received")
     add_event("📥 پیام جدیدی از کانال مبدا دریافت شد.")
 
-    if not bot_state.get("running", False):
+    if not is_bot_running():
         add_event("⏸️ پیام دریافتی نادیده گرفته شد زیرا ربات در حالت توقف است.", "warning")
-        if logs is not None:
-            add_log_entry(
-                symbol=None,
-                market=None,
-                side=None,
-                rr=None,
-                sent=False,
-            )
+        add_log_entry(
+            symbol=None,
+            market=None,
+            side=None,
+            rr=None,
+            sent=False,
+        )
         return
 
     parsed = try_parsers(event_text)
     if not parsed:
-        if counters is not None:
-            counters["rejected"] = counters.get("rejected", 0) + 1
+        increment_counter("rejected")
         add_event("❌ پیام دریافتی به عنوان سیگنال شناخته نشد و رد شد.", "warning")
         return
 
     if parsed.get("is_update"):
-        if counters is not None:
-            counters["updates"] = counters.get("updates", 0) + 1
+        increment_counter("updates")
         add_event("ℹ️ پیام دریافتی از نوع آپدیت بود و پردازش نشد.", "info")
         return
 
-    if counters is not None:
-        counters["parsed"] = counters.get("parsed", 0) + 1
+    increment_counter("parsed")
     add_event(
         f"✅ پیام دریافتی به عنوان سیگنال پذیرفته شد: {parsed.get('symbol') or parsed.get('market_type') or 'نامشخص'}",
         "success",
@@ -119,18 +120,15 @@ async def handle_incoming_message(client, event_text: str, counters=None, logs=N
     formatted = render_signal(parsed, event_text)
     await send_to_destination(client, formatted, parsed.get("symbol"))
 
-    if counters is not None:
-        counters["sent"] = counters.get("sent", 0) + 1
+    increment_counter("sent")
     add_event(f"📤 سیگنال آماده و برای ارسال نهایی ثبت شد: {parsed.get('symbol') or '-'}", "success")
-    if logs is not None:
-        add_log_entry(
-            symbol=parsed.get("symbol"),
-            market=parsed.get("market_type")
-            or ("Crypto" if "USDT" in (parsed.get("symbol") or "") else "Forex"),
-            side=parsed.get("side"),
-            rr=parsed.get("rr"),
-            sent=True,
-        )
-    if by_market is not None:
-        key = (parsed.get("market_type") or "Forex").lower()
-        by_market[key] = by_market.get(key, 0) + 1
+    add_log_entry(
+        symbol=parsed.get("symbol"),
+        market=parsed.get("market_type")
+        or ("Crypto" if "USDT" in (parsed.get("symbol") or "") else "Forex"),
+        side=parsed.get("side"),
+        rr=parsed.get("rr"),
+        sent=True,
+    )
+    key = (parsed.get("market_type") or "Forex").lower()
+    increment_market_counter(key)

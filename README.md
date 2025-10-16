@@ -44,3 +44,11 @@ python run.py
 ```
 gunicorn -c gunicorn.conf.py wsgi:app
 ```
+
+### Runtime state persistence
+
+The dashboard and worker now persist counters, logs, events and bot status in a
+SQLite database so that multi-process deployments (Render background worker +
+web service) share the same runtime data. The database location can be adjusted
+via the `STATE_DB_PATH` environment variable; by default it is stored in the
+project root as `state-data.sqlite3`.
