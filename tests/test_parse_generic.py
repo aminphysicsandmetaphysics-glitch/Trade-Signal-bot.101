@@ -51,3 +51,17 @@ def test_signal_without_symbol_is_rejected():
 
     parsed = parse_signal_generic(msg)
     assert parsed is None
+
+
+def test_reject_long_with_lower_targets():
+    msg = """Lingrid private signals\nGOLD BUY 3663\nSL 3700\nTP 3600\n"""
+
+    parsed = parse_signal_generic(msg)
+    assert parsed is None
+
+
+def test_reject_short_with_higher_targets():
+    msg = """United Kings VIP\nSell XAUUSD @ 3983\nSL: 3970\nTP1: 3990\n"""
+
+    parsed = parse_signal_generic(msg)
+    assert parsed is None

@@ -8,6 +8,7 @@ from ..utils.normalize import (
 )
 from ..utils.rr import format_rr
 from ..utils.numbers import extract_numbers, normalize_numeric_text
+from ..utils.validation import has_valid_name, validate_price_structure
 from .parse_signal_2xclub import pick_best_entry
 
 
@@ -230,8 +231,14 @@ def parse_signal_generic(message_text: str):
     if not symbol:
         return None
 
-    if not (entry and targets and stop):
+    if not has_valid_name(symbol):
+        return None
+
+    if entry is None or stop is None or not targets:
         # At minimum we expect entry, stop, and at least one target for a valid signal.
+        return None
+
+    if not validate_price_structure(entry, targets, stop, side):
         return None
 
     market_type = "Crypto" if is_crypto(symbol, text) else "Forex"
@@ -239,7 +246,7 @@ def parse_signal_generic(message_text: str):
         symbol = ensure_usdt(symbol)
 
     rr = None
-    if entry and stop and targets:
+    if entry is not None and stop is not None and targets:
         rr = format_rr(entry, stop, targets[0], side)
 
     parsed = {

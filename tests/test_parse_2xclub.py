@@ -40,3 +40,14 @@ def test_short_signal_pick_highest_entry():
     assert not parsed["is_update"]
     assert parsed["side"] == "SHORT"
     assert abs(parsed["entry"] - 27461.5) < 1e-9
+
+
+def test_reject_inconsistent_short_signal():
+    msg = """رمزارز بیتکوین
+پوزیشن شورت باز کنید
+در نقطه 60000
+تارگت: 61000
+استاپ: 59000"""
+
+    parsed = parse_signal_2xclub(msg)
+    assert parsed is None
