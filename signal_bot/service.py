@@ -2,8 +2,9 @@ import asyncio
 import logging
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from .parsers.parse_signal_2xclub import parse_signal_2xclub
-from .utils.normalize import is_crypto, is_gold, ensure_usdt
+from .utils.normalize import is_crypto, ensure_usdt
 from .utils.rr import format_rr
+from .state import add_event
 
 logger = logging.getLogger("signal-bot.service")
 
@@ -54,20 +55,24 @@ def try_parsers(message_text: str) -> dict | None:
 async def handle_incoming_message(client, event_text: str, counters=None, logs=None, by_market=None):
     if counters is not None:
         counters["received"] = counters.get("received", 0) + 1
+    add_event("پیام جدیدی از کانال مبدا دریافت شد.")
 
     parsed = try_parsers(event_text)
     if not parsed:
         if counters is not None:
             counters["rejected"] = counters.get("rejected", 0) + 1
+        add_event("پیام دریافتی شناسایی نشد و نادیده گرفته شد.", "warning")
         return
 
     if parsed.get("is_update"):
         if counters is not None:
             counters["updates"] = counters.get("updates", 0) + 1
+        add_event("پیام آپدیت دریافت شد و پردازش نشد.", "info")
         return
 
     if counters is not None:
         counters["parsed"] = counters.get("parsed", 0) + 1
+    add_event(f"سیگنال {parsed.get('symbol') or parsed.get('market_type') or 'جدید'} با موفقیت تحلیل شد.", "success")
 
     if not parsed.get("rr"):
         entry, stop, targets, side = parsed.get("entry"), parsed.get("stop"), parsed.get("targets"), parsed.get("side")
@@ -82,6 +87,7 @@ async def handle_incoming_message(client, event_text: str, counters=None, logs=N
 
     if counters is not None:
         counters["sent"] = counters.get("sent", 0) + 1
+    add_event(f"سیگنال برای ارسال آماده و منتقل شد: {parsed.get('symbol') or '-'}", "success")
     if logs is not None:
         logs.append({
             "ts": None,
