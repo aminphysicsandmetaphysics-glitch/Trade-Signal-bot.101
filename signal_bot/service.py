@@ -2,6 +2,7 @@ import asyncio
 import logging
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from .parsers.parse_signal_2xclub import parse_signal_2xclub
+from .parsers.parse_signal_generic import parse_signal_generic
 from .utils.normalize import is_crypto, ensure_usdt
 from .utils.rr import format_rr
 from .state import add_event
@@ -47,9 +48,10 @@ def render_signal(parsed: dict, original_text: str) -> str:
     )
 
 def try_parsers(message_text: str) -> dict | None:
-    p = parse_signal_2xclub(message_text)
-    if p:
-        return p
+    for parser in (parse_signal_2xclub, parse_signal_generic):
+        parsed = parser(message_text)
+        if parsed:
+            return parsed
     return None
 
 async def handle_incoming_message(client, event_text: str, counters=None, logs=None, by_market=None):

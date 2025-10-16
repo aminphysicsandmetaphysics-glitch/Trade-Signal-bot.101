@@ -1,7 +1,7 @@
 import re
-from statistics import mean
 from ..utils.normalize import fa_to_en, ensure_usdt
 from ..utils.rr import format_rr
+from ..utils.numbers import extract_numbers
 
 UPDATE_PATTERNS = [
     r"تارگت\s+(اول|دوم|سوم|چهارم|پنجم)|فول\s*تارگت",
@@ -70,25 +70,24 @@ def parse_signal_2xclub(message_text: str):
     entries = []
     em = re.findall(r"(?:در\s+نقطه(?:\s+میانگین)?|در\s+نقاط)\s+([^\n]+)", t)
     if em:
-        nums = re.findall(r"\d+\.\d+", em[0])
-        entries = [float(x) for x in nums]
+        entries = extract_numbers(em[0])
     else:
-        nums = re.findall(r"(?<=نقطه\s)(\d+\.\d+)", t)
-        if nums:
-            entries = [float(x) for x in nums]
+        nm = re.findall(r"(?<=نقطه\s)(\d+(?:\.\d+)?)", t)
+        if nm:
+            entries = [float(x) for x in nm]
 
     entry = pick_best_entry(entries, side)
 
     targets = []
     tm = re.search(r"تارگت[:\s]+([^\n]+)", t)
     if tm:
-        nums = re.findall(r"\d+\.\d+", tm.group(1))
-        targets = [float(x) for x in nums]
+        targets = extract_numbers(tm.group(1))
 
     stop = None
-    sm = re.search(r"استاپ[:\s]+([\d\.]+)", t)
+    sm = re.search(r"استاپ[:\s]+([^\s\n]+)", t)
     if sm:
-        stop = float(sm.group(1))
+        nums = extract_numbers(sm.group(1))
+        stop = nums[0] if nums else None
 
     rr = None
     if entry and stop and targets:
