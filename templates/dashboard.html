@@ -16,6 +16,13 @@
           <span class="text-sm text-gray-400">وضعیت ربات:</span>
           <span id="bot-status" class="px-3 py-1 text-xs font-semibold rounded-full bg-emerald-600/40 text-emerald-100 border border-emerald-500/50">فعال</span>
         </div>
+        <div class="flex items-center gap-2 justify-end">
+          <span class="text-sm text-gray-400">سلامت سامانه:</span>
+          <span id="health-badge" class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-600/40 text-slate-100 border border-slate-500/40">در حال بررسی...</span>
+        </div>
+        <p id="health-detail" class="text-xs text-gray-500 text-right leading-relaxed max-w-sm">
+          وضعیت سلامت پس از بررسی نمایش داده می‌شود.
+        </p>
         <div class="flex gap-2 justify-end">
           <button id="btn-start" class="px-4 py-2 bg-emerald-600 rounded-lg hover:bg-emerald-500">Start</button>
           <button id="btn-stop" class="px-4 py-2 bg-rose-600 rounded-lg hover:bg-rose-500">Stop</button>
@@ -87,6 +94,8 @@
   let messageTimer;
   const statusEl = document.getElementById('bot-status');
   const actionMessage = document.getElementById('action-message');
+  const healthBadge = document.getElementById('health-badge');
+  const healthDetail = document.getElementById('health-detail');
 
   function updateStatus(running) {
     if (!statusEl) return;
@@ -116,6 +125,58 @@
     messageTimer = setTimeout(() => {
       actionMessage.classList.add('hidden');
     }, 5000);
+  }
+
+  function renderHealthBadge(status) {
+    if (!healthBadge) return;
+    const base = 'px-3 py-1 text-xs font-semibold rounded-full border';
+    const map = {
+      ok: { cls: 'bg-emerald-600/40 text-emerald-100 border-emerald-500/60', text: 'سالم' },
+      warning: { cls: 'bg-amber-600/30 text-amber-100 border-amber-500/50', text: 'هشدار' },
+      error: { cls: 'bg-rose-600/30 text-rose-100 border-rose-500/50', text: 'خطا' },
+      unknown: { cls: 'bg-slate-600/40 text-slate-100 border-slate-500/40', text: 'نامشخص' }
+    };
+    const payload = map[status] || map.unknown;
+    healthBadge.className = `${base} ${payload.cls}`;
+    healthBadge.innerText = payload.text;
+  }
+
+  function renderHealthDetail(summary) {
+    if (!healthDetail) return;
+    if (!summary) {
+      healthDetail.innerText = 'وضعیت سلامت در دسترس نیست.';
+      return;
+    }
+    const parts = [];
+    if (summary.events?.last_error) {
+      parts.push(`❌ ${summary.events.last_error.message || 'خطای ثبت شده.'}`);
+    } else if (summary.events?.last_warning) {
+      parts.push(`⚠️ ${summary.events.last_warning.message || 'هشدار ثبت شده.'}`);
+    }
+    if (summary.logs?.pending_unsent) {
+      const log = summary.logs.pending_unsent;
+      const symbol = log.symbol ? `#${log.symbol}` : 'بدون نماد';
+      parts.push(`⌛ سیگنال در انتظار ارسال (${symbol})`);
+    }
+    if (!parts.length) {
+      healthDetail.innerText = 'همه‌چیز طبیعی است و خطا یا هشدار فعالی ثبت نشده است.';
+      return;
+    }
+    healthDetail.innerText = parts.join(' | ');
+  }
+
+  async function fetchHealth() {
+    try {
+      const r = await fetch('/api/health');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const summary = await r.json();
+      renderHealthBadge(summary.status || (summary.healthy ? 'ok' : 'unknown'));
+      renderHealthDetail(summary);
+    } catch (err) {
+      console.warn('Health check failed:', err);
+      renderHealthBadge('unknown');
+      renderHealthDetail(null);
+    }
   }
 
   function formatTime(value) {
@@ -223,6 +284,7 @@
       updateStatus(Boolean(data.running));
       showMessage(data.message || 'عملیات انجام شد.', data.running ? 'success' : 'info');
       await fetchEvents();
+      await fetchHealth();
       await fetchStatus();
     } catch (err) {
       showMessage('خطا در ارتباط با سرور.', 'error');
@@ -235,6 +297,7 @@
       updateStatus(Boolean(data.running));
       showMessage(data.message || 'عملیات انجام شد.', data.running ? 'info' : 'warning');
       await fetchEvents();
+      await fetchHealth();
       await fetchStatus();
     } catch (err) {
       showMessage('خطا در ارتباط با سرور.', 'error');
@@ -272,7 +335,7 @@
   };
 
   async function tick(){
-    const tasks = [fetchStatus, fetchLogs, fetchEvents];
+    const tasks = [fetchStatus, fetchHealth, fetchLogs, fetchEvents];
     for (const fn of tasks) {
       try {
         await fn();
