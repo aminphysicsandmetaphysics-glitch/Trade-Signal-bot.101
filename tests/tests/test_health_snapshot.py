@@ -1,27 +1,30 @@
 from signal_bot.state import (
     add_event,
     add_log_entry,
-    counters,
-    events,
+    get_counters,
+    get_events,
     get_health_snapshot,
-    logs,
+    get_logs,
 )
 
 
 def test_health_snapshot_ok_state():
     # runtime state is reset by the autouse fixture in conftest
     snapshot = get_health_snapshot()
+    events_buffer = get_events()
+    logs_buffer = get_logs()
+    counters_snapshot = get_counters()
 
     assert snapshot["healthy"] is True
     assert snapshot["status"] == "ok"
     assert snapshot["running"] is True
-    assert snapshot["events"]["total"] == len(events)
+    assert snapshot["events"]["total"] == len(events_buffer)
     assert snapshot["events"]["last_error"] is None
     assert snapshot["events"]["last_warning"] is None
-    assert snapshot["logs"]["total"] == 0
+    assert snapshot["logs"]["total"] == len(logs_buffer)
     assert snapshot["logs"]["last_entry"] is None
     assert snapshot["logs"]["pending_unsent"] is None
-    assert snapshot["counters"] == counters
+    assert snapshot["counters"] == counters_snapshot
 
 
 def test_health_snapshot_with_warning():

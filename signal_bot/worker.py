@@ -5,7 +5,7 @@ import logging
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from .service import handle_incoming_message
-from .state import counters, logs, by_market, add_event
+from .state import add_event, increment_counter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("signal-bot.worker")
@@ -67,9 +67,9 @@ async def start_worker():
     async def on_new_message(event):
         try:
             text = event.raw_text or ""
-            await handle_incoming_message(client, text, counters=counters, logs=logs, by_market=by_market)
+            await handle_incoming_message(client, text)
         except Exception as e:
-            counters["rejected"] = counters.get("rejected", 0) + 1
+            increment_counter("rejected")
             logger.exception("Error handling message: %s", e)
             add_event("❌ خطا در پردازش پیام ورودی رخ داد.", "error")
 

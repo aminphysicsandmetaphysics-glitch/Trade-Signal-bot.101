@@ -1,14 +1,15 @@
 from flask import render_template, jsonify, request
 from .service import try_parsers, render_signal
 from .state import (
-    counters,
-    logs,
-    by_market,
-    start_ts,
-    events,
-    bot_state,
     add_event,
+    get_by_market,
+    get_counters,
+    get_events,
     get_health_snapshot,
+    get_logs,
+    get_start_timestamp,
+    is_bot_running,
+    set_bot_running,
 )
 
 def setup_routes(app):
@@ -19,7 +20,8 @@ def setup_routes(app):
     @app.get("/api/status")
     def api_status():
         import time
-        uptime = int(time.time() - start_ts)
+        uptime = int(time.time() - get_start_timestamp())
+        counters = get_counters()
         return jsonify({
             "uptime": uptime,
             "received": counters.get("received", 0),
@@ -27,8 +29,8 @@ def setup_routes(app):
             "sent": counters.get("sent", 0),
             "rejected": counters.get("rejected", 0),
             "updates": counters.get("updates", 0),
-            "by_market": by_market,
-            "running": bot_state.get("running", False),
+            "by_market": get_by_market(),
+            "running": is_bot_running(),
         })
 
     @app.get("/api/health")
@@ -37,29 +39,29 @@ def setup_routes(app):
 
     @app.get("/api/logs")
     def api_logs():
-        return jsonify(list(logs))
+        return jsonify(get_logs())
 
     @app.get("/api/events")
     def api_events():
-        return jsonify(list(events))
+        return jsonify(get_events())
 
     @app.post("/api/bot/start")
     def api_bot_start():
         message = "ربات از قبل فعال بود."
-        if not bot_state.get("running", False):
-            bot_state["running"] = True
+        if not is_bot_running():
+            set_bot_running(True)
             message = "ربات با موفقیت فعال شد."
             add_event("🟢 ربات از طریق داشبورد فعال شد و در حال شنود است.", "success")
-        return jsonify({"ok": True, "running": bot_state.get("running", False), "message": message})
+        return jsonify({"ok": True, "running": is_bot_running(), "message": message})
 
     @app.post("/api/bot/stop")
     def api_bot_stop():
         message = "ربات از قبل متوقف شده بود."
-        if bot_state.get("running", False):
-            bot_state["running"] = False
+        if is_bot_running():
+            set_bot_running(False)
             message = "ربات موقتا متوقف شد."
             add_event("🛑 ربات از طریق داشبورد متوقف شد و شنود متوقف گردید.", "warning")
-        return jsonify({"ok": True, "running": bot_state.get("running", False), "message": message})
+        return jsonify({"ok": True, "running": is_bot_running(), "message": message})
 
     @app.post("/api/test-signal")
     def api_test_signal():
