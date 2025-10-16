@@ -44,7 +44,7 @@ def setup_routes(app):
         if not bot_state.get("running", False):
             bot_state["running"] = True
             message = "ربات با موفقیت فعال شد."
-            add_event("ربات توسط داشبورد فعال شد.", "success")
+            add_event("🟢 ربات از طریق داشبورد فعال شد و در حال شنود است.", "success")
         return jsonify({"ok": True, "running": bot_state.get("running", False), "message": message})
 
     @app.post("/api/bot/stop")
@@ -53,7 +53,7 @@ def setup_routes(app):
         if bot_state.get("running", False):
             bot_state["running"] = False
             message = "ربات موقتا متوقف شد."
-            add_event("ربات توسط داشبورد متوقف شد.", "warning")
+            add_event("🛑 ربات از طریق داشبورد متوقف شد و شنود متوقف گردید.", "warning")
         return jsonify({"ok": True, "running": bot_state.get("running", False), "message": message})
 
     @app.post("/api/test-signal")
