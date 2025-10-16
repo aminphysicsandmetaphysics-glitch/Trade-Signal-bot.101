@@ -118,6 +118,22 @@
     }, 5000);
   }
 
+  function formatTime(value) {
+    if (value === null || value === undefined || value === '') {
+      return '-';
+    }
+    const candidate = typeof value === 'number' ? new Date(value * 1000) : new Date(value);
+    if (Number.isNaN(candidate.getTime())) {
+      return `${value}`;
+    }
+    return candidate.toLocaleTimeString('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+  }
+
   async function fetchStatus() {
     const r = await fetch('/api/status'); const s = await r.json();
     document.getElementById('c-received').innerText = s.received ?? 0;
@@ -126,12 +142,26 @@
     document.getElementById('c-rejected').innerText = s.rejected ?? 0;
     document.getElementById('c-updates').innerText = s.updates ?? 0;
     updateStatus(Boolean(s.running));
+
     const crypto = s.by_market?.crypto ?? 0;
     const forex  = s.by_market?.forex ?? 0;
     const gold   = s.by_market?.gold ?? 0;
     const data = { labels: ['Crypto','Forex','Gold'], datasets: [{ data: [crypto, forex, gold] }]};
-    if (!pie) { pie = new Chart(document.getElementById('pie-market'), { type: 'pie', data }); }
-    else { pie.data = data; pie.update(); }
+
+    try {
+      const chartCanvas = document.getElementById('pie-market');
+      if (typeof window.Chart === 'undefined' || !chartCanvas) {
+        return;
+      }
+      if (!pie) {
+        pie = new Chart(chartCanvas, { type: 'pie', data });
+      } else {
+        pie.data = data;
+        pie.update();
+      }
+    } catch (err) {
+      console.warn('Pie chart update skipped:', err);
+    }
   }
   async function fetchLogs() {
     const r = await fetch('/api/logs'); const items = await r.json();
@@ -139,7 +169,7 @@
     for (const it of items) {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td class="p-2 whitespace-nowrap">${it.ts || '-'}</td>
+        <td class="p-2 whitespace-nowrap">${formatTime(it.ts ?? it.ts_epoch)}</td>
         <td class="p-2">#${it.symbol || '-'}</td>
         <td class="p-2">${it.market || '-'}</td>
         <td class="p-2">${(it.side || '').toUpperCase()}</td>
@@ -176,7 +206,7 @@
       const li = document.createElement('li');
       li.className = 'flex items-start gap-3 bg-gray-950/40 border border-gray-800 rounded-lg p-3';
       li.innerHTML = `
-        <span class="text-xs font-mono text-gray-500 mt-0.5">${ev.ts || '-'}</span>
+        <span class="text-xs font-mono text-gray-500 mt-0.5">${formatTime(ev.ts ?? ev.ts_epoch)}</span>
         <div class="flex-1">
           <div class="text-sm leading-relaxed">${ev.message || '-'}</div>
           <span class="inline-block mt-2 px-2 py-0.5 text-[11px] rounded-full ${badge.cls}">${badge.text}</span>
@@ -241,7 +271,16 @@
     document.getElementById('test-result').innerText = '';
   };
 
-  async function tick(){ await fetchStatus(); await fetchLogs(); await fetchEvents(); }
+  async function tick(){
+    const tasks = [fetchStatus, fetchLogs, fetchEvents];
+    for (const fn of tasks) {
+      try {
+        await fn();
+      } catch (err) {
+        console.error('Dashboard update failed:', err);
+      }
+    }
+  }
   tick(); setInterval(tick, 5000);
   </script>
 </body>
