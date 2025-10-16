@@ -55,6 +55,13 @@ def _timestamp_payload() -> Dict[str, Any]:
 def _connection() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(_DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # Enable WAL mode and configure a generous busy timeout so concurrent
+    # readers/writers from different processes do not fail with
+    # ``sqlite3.OperationalError: database is locked``.  This is particularly
+    # important for the dashboard endpoints which frequently open short-lived
+    # connections in parallel with the worker process updating the state.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
     try:
         yield conn
         conn.commit()
