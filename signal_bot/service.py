@@ -5,7 +5,7 @@ from .parsers.parse_signal_2xclub import parse_signal_2xclub
 from .parsers.parse_signal_generic import parse_signal_generic
 from .utils.normalize import is_crypto, ensure_usdt
 from .utils.rr import format_rr
-from .state import add_event
+from .state import add_event, add_log_entry, bot_state
 
 logger = logging.getLogger("signal-bot.service")
 
@@ -76,6 +76,18 @@ async def handle_incoming_message(client, event_text: str, counters=None, logs=N
         counters["received"] = counters.get("received", 0) + 1
     add_event("📥 پیام جدیدی از کانال مبدا دریافت شد.")
 
+    if not bot_state.get("running", False):
+        add_event("⏸️ پیام دریافتی نادیده گرفته شد زیرا ربات در حالت توقف است.", "warning")
+        if logs is not None:
+            add_log_entry(
+                symbol=None,
+                market=None,
+                side=None,
+                rr=None,
+                sent=False,
+            )
+        return
+
     parsed = try_parsers(event_text)
     if not parsed:
         if counters is not None:
@@ -111,14 +123,14 @@ async def handle_incoming_message(client, event_text: str, counters=None, logs=N
         counters["sent"] = counters.get("sent", 0) + 1
     add_event(f"📤 سیگنال آماده و برای ارسال نهایی ثبت شد: {parsed.get('symbol') or '-'}", "success")
     if logs is not None:
-        logs.append({
-            "ts": None,
-            "symbol": parsed.get("symbol"),
-            "market": parsed.get("market_type") or ("Crypto" if "USDT" in (parsed.get("symbol") or "") else "Forex"),
-            "side": parsed.get("side"),
-            "rr": parsed.get("rr"),
-            "sent": True,
-        })
+        add_log_entry(
+            symbol=parsed.get("symbol"),
+            market=parsed.get("market_type")
+            or ("Crypto" if "USDT" in (parsed.get("symbol") or "") else "Forex"),
+            side=parsed.get("side"),
+            rr=parsed.get("rr"),
+            sent=True,
+        )
     if by_market is not None:
         key = (parsed.get("market_type") or "Forex").lower()
         by_market[key] = by_market.get(key, 0) + 1
